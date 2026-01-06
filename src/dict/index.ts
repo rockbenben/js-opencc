@@ -16,3 +16,5 @@ export { default as HKVariantsRev } from './HKVariantsRev.js';
 export { default as TWVariantsRev } from './TWVariantsRev.js';
 export { default as JPVariantsRev } from './JPVariantsRev.js';
 export { default as TWPhrasesRev } from './TWPhrasesRev.js';
+export { default as CNTWPhrases } from './CNTWPhrases.js';
+export { default as CharFixes } from './CharFixes.js';

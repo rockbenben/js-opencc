@@ -53,16 +53,28 @@ async function downloadFile(fileName: string): Promise<string> {
   return response.text();
 }
 
-function parseToEntries(content: string): [string, string][] {
+function parseToEntries(content: string, isCustom: boolean = false): [string, string][] {
   return content
     .trim()
-    .split("\n")
+    .split(/\r?\n/)
     .map((line) => {
+      // Skip comments
+      if (line.startsWith("#") || !line.trim()) return null;
+
       const [key, values] = line.split("\t");
-      const value = values?.split(" ")[0]; // Take only first candidate
-      return [key, value] as [string, string];
+      if (!key || !values) return null;
+
+      let value = values;
+      if (!isCustom) {
+        // For official dicts, take first candidate (space separated)
+        value = values.split(" ")[0];
+      } else {
+        // For custom dicts, take the whole string (trim whitespace)
+        value = values.trim();
+      }
+      return [key.trim(), value] as [string, string];
     })
-    .filter(([k, v]) => k && v);
+    .filter((entry): entry is [string, string] => entry !== null && !!entry[0] && !!entry[1]);
 }
 
 function entriesToOptimized(entries: [string, string][]): string {
@@ -149,6 +161,31 @@ async function main() {
 
   // Generate dict index file
   const allDictNames = [...OFFICIAL_DICT_FILES, ...Object.keys(REVERSE_DICT_MAPPINGS)];
+
+  // Process Custom Dictionaries
+  console.log("\n3. Processing custom dictionaries:");
+  const customDictDir = path.join(ROOT_DIR, "data", "custom");
+  const customDicts = ["CNTWPhrases", "CharFixes"];
+
+  for (const name of customDicts) {
+    try {
+      const p = path.join(customDictDir, `${name}.txt`);
+      if (fs.existsSync(p)) {
+        const content = fs.readFileSync(p, "utf-8");
+        const entries = parseToEntries(content);
+        const optimized = entriesToOptimized(entries);
+        const dictPath = path.join(dictDir, `${name}.ts`);
+        fs.writeFileSync(dictPath, `export default "${optimized}";\n`, "utf-8");
+        allDictNames.push(name);
+        console.log(`    ✓ ${name} (${entries.length} entries)`);
+      } else {
+        console.log(`    ⚠ ${name} not found in data/custom/`);
+      }
+    } catch (e) {
+      console.error(`    ✗ ${name}: ${e}`);
+    }
+  }
+
   const indexContent = allDictNames.map((name) => `export { default as ${name} } from './${name}.js';`).join("\n");
   fs.writeFileSync(path.join(dictDir, "index.ts"), indexContent + "\n", "utf-8");
 

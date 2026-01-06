@@ -3,9 +3,8 @@
  * High-level API for creating converters
  */
 
-import * as fs from "fs";
-import * as path from "path";
-import { fileURLToPath } from "url";
+// Imports removed
+
 import { ConverterFactory, DictGroup, DictLike } from "./core.js";
 import { variants2standard, standard2variants, LocaleCode } from "./presets.js";
 
@@ -75,36 +74,6 @@ export function getDictFiles(from: LocaleCode, to: LocaleCode): string[] {
 }
 
 /**
- * Load custom dictionary from file
- */
-function loadCustomDictFile(filePath: string): string[][] | null {
-  try {
-    if (!fs.existsSync(filePath)) return null;
-    const content = fs.readFileSync(filePath, "utf-8");
-    const entries: string[][] = [];
-    for (const line of content.split("\n")) {
-      if (line.startsWith("#") || !line.trim()) continue;
-      const [key, value] = line.split("\t");
-      if (key && value) {
-        entries.push([key.trim(), value.trim()]);
-      }
-    }
-    return entries.length > 0 ? entries : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Get the custom dictionary directory path
- */
-function getCustomDictDir(): string {
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
-  return path.resolve(__dirname, "..", "data", "custom");
-}
-
-/**
  * Load dictionaries and create a converter
  * This is the recommended way to create converters in Node.js
  *
@@ -118,11 +87,23 @@ export async function createConverter(options: ConverterOptions, customDict?: Di
   // Import all dictionaries
   const dictModules = await import("./dict/index.js");
 
+  // Helper to load dictionary from modules
+  const loadDictFromModule = (name: string): string[][] | null => {
+    const dictData = (dictModules as Record<string, string>)[name];
+    if (!dictData) return null;
+    return dictData.split("|").map((entry) => {
+      const parts = entry.split(" ");
+      const k = parts[0];
+      const v = parts.slice(1).join(" ");
+      return [k, v || k]; // For single char which might be optimized to just "A" if A->A
+    });
+  };
+
   // Load each required dictionary
   for (const fileName of dictFiles) {
-    const dictData = (dictModules as Record<string, string>)[fileName];
-    if (dictData) {
-      dictGroups.push([dictData]);
+    const dict = loadDictFromModule(fileName);
+    if (dict) {
+      dictGroups.push([dict]);
     } else {
       console.warn(`Dictionary ${fileName} not found. Run 'npm run sync:opencc' first.`);
     }
@@ -131,35 +112,31 @@ export async function createConverter(options: ConverterOptions, customDict?: Di
   // Auto-load custom phrase dictionary for twp conversion
   const loadPhrases = options.loadCustomPhrases ?? (options.to === "twp" || options.from === "twp");
   if (loadPhrases) {
-    const customDir = getCustomDictDir();
-    const phrasesFile = path.join(customDir, "CNTWPhrases.txt");
-    const phrases = loadCustomDictFile(phrasesFile);
+    const phrases = loadDictFromModule("CNTWPhrases");
     if (phrases) {
       // For cn → twp: use as-is (大陸 → 台灣)
       // For twp → cn: reverse the mapping (台灣 → 大陸)
       if (options.from === "twp" && options.to === "cn") {
         const reversed = phrases.map(([cn, tw]) => [tw, cn]);
-        dictGroups.push([reversed]);
+        dictGroups.unshift([reversed]);
       } else {
-        dictGroups.push([phrases]);
+        dictGroups.unshift([phrases]);
       }
+    }
+  }
+
+  // Apply character fixes (always enabled by default)
+  const applyFixes = options.applyCharFixes ?? true;
+  if (applyFixes) {
+    const fixes = loadDictFromModule("CharFixes");
+    if (fixes) {
+      dictGroups.unshift([fixes]);
     }
   }
 
   // Add user-provided custom dictionary
   if (customDict) {
-    dictGroups.push([customDict]);
-  }
-
-  // Apply character fixes at the end (always enabled by default)
-  const applyFixes = options.applyCharFixes ?? true;
-  if (applyFixes) {
-    const customDir = getCustomDictDir();
-    const fixesFile = path.join(customDir, "CharFixes.txt");
-    const fixes = loadCustomDictFile(fixesFile);
-    if (fixes) {
-      dictGroups.push([fixes]);
-    }
+    dictGroups.unshift([customDict]);
   }
 
   return ConverterFactory(...dictGroups);

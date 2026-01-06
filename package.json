@@ -1,6 +1,6 @@
 {
   "name": "js-opencc",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Pure JavaScript implementation of OpenCC for Chinese conversion, with auto-sync from official OpenCC dictionaries",
   "type": "module",
   "main": "./dist/umd/full.js",
@@ -30,7 +30,7 @@
     }
   },
   "scripts": {
-    "build": "tsc && rollup -c",
+    "build": "npm run sync:opencc && tsc && rollup -c",
     "build:esm": "tsc",
     "build:umd": "rollup -c",
     "sync:opencc": "tsx scripts/sync-opencc.ts",

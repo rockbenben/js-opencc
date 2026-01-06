@@ -16,6 +16,9 @@ describe("createConverter", () => {
 
     // TWP includes IT phrase conversion (e.g., 软件 -> 軟體)
     expect(convert("软件")).toBe("軟體");
+
+    // CNTWPhrases should also be loaded for twp: 幼儿园 -> 幼稚園
+    expect(convert("幼儿园")).toBe("幼稚園");
   });
 
   it("should convert tw to cn", async () => {
@@ -28,12 +31,12 @@ describe("createConverter", () => {
   });
 
   it("should support custom dictionary overlay", async () => {
-    // Custom dictionary is applied AFTER standard conversion
-    // So we need to use the traditional form as the key
-    const customDict: string[][] = [["自定義", "自訂"]];
+    // Custom dictionary is applied BEFORE standard conversion
+    // So we need to use the simplified form as the key
+    const customDict: string[][] = [["自定义", "自訂"]];
     const convert = await createConverter({ from: "cn", to: "tw" }, customDict);
 
-    // 自定义 -> 自定義 (by STCharacters) -> 自訂 (by customDict)
+    // 自定义 -> 自訂 (by customDict) -> 自訂 (by standard, remains same)
     expect(convert("自定义")).toBe("自訂");
   });
 });
