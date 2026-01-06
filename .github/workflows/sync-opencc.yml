@@ -1,0 +1,54 @@
+name: Sync OpenCC Dictionaries
+
+on:
+  schedule:
+    # Run weekly on Sunday at 00:00 UTC
+    - cron: "0 0 * * 0"
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Sync dictionaries from OpenCC
+        run: npm run sync:opencc
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+
+      - name: Check for changes
+        id: check_changes
+        run: |
+          if [[ -n $(git status --porcelain) ]]; then
+            echo "changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "changes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Pull Request
+        if: steps.check_changes.outputs.changes == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          commit-message: "chore: sync dictionaries from OpenCC"
+          title: "📚 Sync dictionaries from OpenCC"
+          body: |
+            This PR updates the dictionaries from the official OpenCC repository.
+
+            Triggered by: Scheduled weekly sync / Manual trigger
+          branch: sync-opencc-dictionaries
+          delete-branch: true

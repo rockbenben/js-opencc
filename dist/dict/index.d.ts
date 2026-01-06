@@ -1,0 +1,19 @@
+export { default as HKVariants } from './HKVariants.js';
+export { default as HKVariantsRevPhrases } from './HKVariantsRevPhrases.js';
+export { default as JPShinjitaiCharacters } from './JPShinjitaiCharacters.js';
+export { default as JPShinjitaiPhrases } from './JPShinjitaiPhrases.js';
+export { default as JPVariants } from './JPVariants.js';
+export { default as STCharacters } from './STCharacters.js';
+export { default as STPhrases } from './STPhrases.js';
+export { default as TSCharacters } from './TSCharacters.js';
+export { default as TSPhrases } from './TSPhrases.js';
+export { default as TWPhrasesIT } from './TWPhrasesIT.js';
+export { default as TWPhrasesName } from './TWPhrasesName.js';
+export { default as TWPhrasesOther } from './TWPhrasesOther.js';
+export { default as TWVariants } from './TWVariants.js';
+export { default as TWVariantsRevPhrases } from './TWVariantsRevPhrases.js';
+export { default as HKVariantsRev } from './HKVariantsRev.js';
+export { default as TWVariantsRev } from './TWVariantsRev.js';
+export { default as JPVariantsRev } from './JPVariantsRev.js';
+export { default as TWPhrasesRev } from './TWPhrasesRev.js';
+//# sourceMappingURL=index.d.ts.map

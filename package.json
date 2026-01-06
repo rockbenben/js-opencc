@@ -1,0 +1,74 @@
+{
+  "name": "js-opencc",
+  "version": "1.0.0",
+  "description": "Pure JavaScript implementation of OpenCC for Chinese conversion, with auto-sync from official OpenCC dictionaries",
+  "type": "module",
+  "main": "./dist/umd/full.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "data"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/umd/full.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./cn2t": {
+      "import": "./dist/umd/cn2t.js",
+      "require": "./dist/umd/cn2t.js"
+    },
+    "./t2cn": {
+      "import": "./dist/umd/t2cn.js",
+      "require": "./dist/umd/t2cn.js"
+    },
+    "./core": {
+      "import": "./dist/core.js",
+      "types": "./dist/core.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc && rollup -c",
+    "build:esm": "tsc",
+    "build:umd": "rollup -c",
+    "sync:opencc": "tsx scripts/sync-opencc.ts",
+    "export:pr": "tsx scripts/export-pr.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "opencc",
+    "chinese",
+    "simplified-chinese",
+    "traditional-chinese",
+    "chinese-conversion",
+    "繁简转换",
+    "簡繁轉換",
+    "简体",
+    "繁体",
+    "中文转换"
+  ],
+  "author": "rockbenben",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^12.3.0",
+    "@types/node": "^25.0.3",
+    "rollup": "^4.55.1",
+    "tslib": "^2.8.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.2.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rockbenben/js-opencc.git"
+  },
+  "bugs": {
+    "url": "https://github.com/rockbenben/js-opencc/issues"
+  },
+  "homepage": "https://github.com/rockbenben/js-opencc#readme"
+}

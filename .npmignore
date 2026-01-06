@@ -1,0 +1,10 @@
+# 不發布到 npm 的文件
+src/
+test/
+scripts/
+.github/
+*.ts
+!*.d.ts
+tsconfig.json
+vitest.config.ts
+rollup.config.js
