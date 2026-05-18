@@ -1,10 +1,12 @@
 /**
- * Export custom dictionary entries for OpenCC PR
+ * Export custom dictionary entries that are candidates for OpenCC upstream PR.
+ *
+ * Compares data/custom/CNTWPhrases.txt against the latest upstream
+ * TWPhrases.txt (fetched live from BYVoid/OpenCC@master). Prints:
+ *   1. NEW entries — present in our custom dict, absent upstream → PR candidates
+ *   2. CONFLICTS — present in both with different values → human review needed
  *
  * Usage: npx tsx scripts/export-pr.ts
- *
- * This script compares your custom dictionary with official dictionaries
- * and generates a diff that can be submitted as a PR to OpenCC.
  */
 
 import * as fs from "fs";
@@ -15,135 +17,129 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, "..");
 
+const UPSTREAM_URL =
+  "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary/TWPhrases.txt";
+
 interface DictEntry {
   key: string;
   value: string;
 }
 
-// Official phrase dictionaries to compare against (only vocabulary/phrase dicts)
-const OFFICIAL_PHRASE_DICTS = ["TWPhrasesIT.txt", "TWPhrasesName.txt", "TWPhrasesOther.txt"];
-
-function parseOfficialDict(content: string): Map<string, string> {
+function parseOpenCCFormat(content: string): Map<string, string> {
   const dict = new Map<string, string>();
-  for (const line of content.trim().split("\n")) {
-    const [key, values] = line.split("\t");
-    if (key && values) {
-      dict.set(key, values.split(" ")[0]); // Take first value
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    const tabIdx = line.indexOf("\t");
+    let key: string;
+    let valueField: string;
+    if (tabIdx >= 0) {
+      key = line.slice(0, tabIdx).trim();
+      valueField = line.slice(tabIdx + 1).trim();
+    } else {
+      const m = line.match(/^(\S+)\s+(.+)$/);
+      if (!m) continue;
+      key = m[1];
+      valueField = m[2];
     }
+    if (!key || !valueField) continue;
+    // First space-separated value wins (matches OpenCC convention)
+    const value = valueField.split(/\s+/)[0];
+    if (value) dict.set(key, value);
   }
   return dict;
 }
 
 function parseCustomDict(content: string): DictEntry[] {
   const entries: DictEntry[] = [];
-  for (const line of content.trim().split("\n")) {
-    if (line.startsWith("#") || !line.trim()) continue;
-    const [key, value] = line.split("\t");
-    if (key && value) {
-      entries.push({ key: key.trim(), value: value.trim() });
-    }
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    const tabIdx = line.indexOf("\t");
+    if (tabIdx < 0) continue;
+    const key = line.slice(0, tabIdx).trim();
+    const value = line.slice(tabIdx + 1).trim().split(/\s+/)[0];
+    if (key && value) entries.push({ key, value });
   }
   return entries;
 }
 
-function main() {
-  const customDir = path.join(ROOT_DIR, "data", "custom");
-  const officialDir = path.join(ROOT_DIR, "data", "official");
-
-  if (!fs.existsSync(customDir)) {
-    console.log("No custom dictionary found at data/custom/");
-    console.log('Create a .txt file with format: "key\\tvalue" per line');
-    return;
+async function fetchUpstream(): Promise<Map<string, string>> {
+  console.log(`Fetching upstream TWPhrases.txt from BYVoid/OpenCC@master...`);
+  const response = await fetch(UPSTREAM_URL);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch upstream: ${response.status} ${response.statusText}`);
   }
-
-  const customFiles = fs.readdirSync(customDir).filter((f) => f.endsWith(".txt"));
-
-  if (customFiles.length === 0) {
-    console.log("No .txt files found in data/custom/");
-    return;
+  const text = await response.text();
+  if (text.trimStart().startsWith("<")) {
+    throw new Error("Upstream returned HTML (likely a CDN error page), not dict content.");
   }
-
-  // Load all official phrase dictionaries
-  const officialPhrases = new Map<string, { value: string; source: string }>();
-  for (const dictFile of OFFICIAL_PHRASE_DICTS) {
-    const dictPath = path.join(officialDir, dictFile);
-    if (fs.existsSync(dictPath)) {
-      const content = fs.readFileSync(dictPath, "utf-8");
-      const dict = parseOfficialDict(content);
-      for (const [key, value] of dict) {
-        if (!officialPhrases.has(key)) {
-          officialPhrases.set(key, { value, source: dictFile });
-        }
-      }
-    }
-  }
-
-  console.log(`已載入 ${officialPhrases.size} 個官方詞條\n`);
-
-  for (const customFile of customFiles) {
-    const customPath = path.join(customDir, customFile);
-    const customContent = fs.readFileSync(customPath, "utf-8");
-    const customEntries = parseCustomDict(customContent);
-
-    if (customEntries.length === 0) continue;
-
-    console.log(`=== ${customFile} (${customEntries.length} 個自定義詞條) ===\n`);
-
-    const newEntries: DictEntry[] = [];
-    const existingEntries: { entry: DictEntry; official: { value: string; source: string } }[] = [];
-    const differentEntries: { entry: DictEntry; official: { value: string; source: string } }[] = [];
-
-    for (const entry of customEntries) {
-      const official = officialPhrases.get(entry.key);
-      if (!official) {
-        newEntries.push(entry);
-      } else if (official.value === entry.value) {
-        existingEntries.push({ entry, official });
-      } else {
-        differentEntries.push({ entry, official });
-      }
-    }
-
-    // Summary
-    console.log("📊 統計:");
-    console.log(`   ✅ 已被 OpenCC 收錄: ${existingEntries.length}`);
-    console.log(`   🆕 OpenCC 未收錄:    ${newEntries.length}`);
-    console.log(`   ⚠️  與官方不同:       ${differentEntries.length}\n`);
-
-    // New entries that can be contributed
-    if (newEntries.length > 0) {
-      console.log("🆕 可以提交給 OpenCC 的新詞條:");
-      console.log("─".repeat(50));
-      for (const e of newEntries.slice(0, 30)) {
-        console.log(`   ${e.key}\t→\t${e.value}`);
-      }
-      if (newEntries.length > 30) {
-        console.log(`   ... 還有 ${newEntries.length - 30} 個詞條`);
-      }
-      console.log();
-    }
-
-    // Different from official
-    if (differentEntries.length > 0) {
-      console.log("⚠️  與官方字典不同（可能需要討論）:");
-      console.log("─".repeat(50));
-      for (const d of differentEntries.slice(0, 10)) {
-        console.log(`   ${d.entry.key}`);
-        console.log(`      官方 (${d.official.source}): ${d.official.value}`);
-        console.log(`      自定義: ${d.entry.value}`);
-      }
-      if (differentEntries.length > 10) {
-        console.log(`   ... 還有 ${differentEntries.length - 10} 個不同的詞條`);
-      }
-      console.log();
-    }
-  }
-
-  console.log("─".repeat(50));
-  console.log("如何貢獻給 OpenCC:");
-  console.log("1. Fork https://github.com/BYVoid/OpenCC");
-  console.log("2. 將詞條添加到 data/dictionary/TWPhrasesIT.txt");
-  console.log("3. 提交 Pull Request");
+  const dict = parseOpenCCFormat(text);
+  console.log(`  Upstream entries: ${dict.size}`);
+  return dict;
 }
 
-main();
+async function main() {
+  const customPath = path.join(ROOT_DIR, "data", "custom", "CNTWPhrases.txt");
+
+  if (!fs.existsSync(customPath)) {
+    console.log("No custom dict at data/custom/CNTWPhrases.txt");
+    return;
+  }
+
+  const customContent = fs.readFileSync(customPath, "utf-8");
+  const customEntries = parseCustomDict(customContent);
+  console.log(`Local CNTWPhrases entries: ${customEntries.length}`);
+
+  const upstream = await fetchUpstream();
+
+  const newEntries: DictEntry[] = [];
+  const conflicts: Array<{ key: string; ours: string; upstream: string }> = [];
+
+  for (const entry of customEntries) {
+    const upstreamValue = upstream.get(entry.key);
+    if (upstreamValue === undefined) {
+      newEntries.push(entry);
+    } else if (upstreamValue !== entry.value) {
+      conflicts.push({ key: entry.key, ours: entry.value, upstream: upstreamValue });
+    }
+    // If upstreamValue === entry.value, entry already in upstream — silent skip.
+  }
+
+  console.log("");
+  console.log("=".repeat(60));
+  console.log(`NEW entries (PR candidates): ${newEntries.length}`);
+  console.log("=".repeat(60));
+  if (newEntries.length === 0) {
+    console.log("(none — all local entries already in upstream)");
+  } else {
+    console.log("Paste into OpenCC's data/dictionary/TWPhrases.txt:");
+    console.log("");
+    for (const e of newEntries) {
+      console.log(`${e.key}\t${e.value}`);
+    }
+  }
+
+  if (conflicts.length > 0) {
+    console.log("");
+    console.log("=".repeat(60));
+    console.log(`CONFLICTS (different value in upstream): ${conflicts.length}`);
+    console.log("=".repeat(60));
+    console.log("These require human review — upstream and local disagree:");
+    console.log("");
+    for (const c of conflicts) {
+      console.log(`  ${c.key}`);
+      console.log(`    ours:     ${c.ours}`);
+      console.log(`    upstream: ${c.upstream}`);
+    }
+  }
+
+  const inSync = customEntries.length - newEntries.length - conflicts.length;
+  console.log("");
+  console.log(`Summary: ${newEntries.length} new / ${conflicts.length} conflict / ${inSync} already in upstream`);
+}
+
+main().catch((err) => {
+  console.error("export:pr failed:", err.message);
+  process.exit(1);
+});
