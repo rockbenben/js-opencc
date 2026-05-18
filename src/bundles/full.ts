@@ -2,7 +2,7 @@
  * Full bundle - includes all locales and converters
  */
 
-import { Trie, ConverterFactory, CustomConverter, DictLike } from "../core.js";
+import { Trie, ConverterFactory, CustomConverter, ProtectedConverter, parseOpenCCDict, DictLike } from "../core.js";
 import { HTMLConverter, HTMLConverterOptions } from "../html-converter.js";
 import { variants2standard, standard2variants, LocaleCode } from "../presets.js";
 
@@ -17,9 +17,18 @@ interface ConverterOptions {
 }
 
 /**
- * Create a converter with the specified locales
+ * Create a converter with the specified locales.
+ *
+ * @param options - Conversion options (from/to locale)
+ * @param protectedDict - Optional hard-override dictionary. Matches are masked
+ *   with PUA placeholders before built-in conversion, then restored — OpenCC
+ *   dictionaries never see or modify them. Highest priority.
+ *
+ *   UMD bundles do NOT auto-load `data/custom/ProtectedDict.txt` (no fs in
+ *   browsers). Pass the dict explicitly; use `parseOpenCCDict` to parse
+ *   OpenCC-format text fetched at runtime.
  */
-function Converter(options: ConverterOptions): (input: string) => string {
+function Converter(options: ConverterOptions, protectedDict?: DictLike): (input: string) => string {
   const dictGroups: DictGroup[] = [];
 
   // From variant to standard
@@ -40,7 +49,11 @@ function Converter(options: ConverterOptions): (input: string) => string {
     }
   }
 
-  return ConverterFactory(...dictGroups);
+  let convert = ConverterFactory(...dictGroups);
+  if (protectedDict) {
+    convert = ProtectedConverter(protectedDict, convert);
+  }
+  return convert;
 }
 
 // Locale data for ConverterBuilder compatibility
@@ -49,6 +62,6 @@ const Locale = {
   to: Object.fromEntries(Object.entries(standard2variants).map(([locale, files]) => [locale, files.map((name) => (dict as Record<string, string>)[name]).filter(Boolean)])),
 };
 
-export { Converter, CustomConverter, ConverterFactory, HTMLConverter, Locale, Trie };
+export { Converter, CustomConverter, ConverterFactory, ProtectedConverter, parseOpenCCDict, HTMLConverter, Locale, Trie };
 
 export type { ConverterOptions, HTMLConverterOptions, LocaleCode, DictLike, DictGroup };

@@ -3,7 +3,7 @@
  * Smaller bundle size for one-way conversion
  */
 
-import { Trie, ConverterFactory, CustomConverter, DictLike } from "../core.js";
+import { Trie, ConverterFactory, CustomConverter, ProtectedConverter, parseOpenCCDict, DictLike } from "../core.js";
 import { HTMLConverter, HTMLConverterOptions } from "../html-converter.js";
 import { variants2standard } from "../presets.js";
 
@@ -43,9 +43,14 @@ const dictMap: Record<string, string> = {
 };
 
 /**
- * Create a converter from Traditional variants to Simplified Chinese
+ * Create a converter from Traditional variants to Simplified Chinese.
+ *
+ * @param options - Conversion options (locale)
+ * @param protectedDict - Optional hard-override dictionary. See cn2t bundle
+ *   docs for semantics. UMD bundles do not auto-load ProtectedDict.txt;
+ *   pass the dict explicitly (use `parseOpenCCDict` for OpenCC-format text).
  */
-function Converter(options: ConverterOptions): (input: string) => string {
+function Converter(options: ConverterOptions, protectedDict?: DictLike): (input: string) => string {
   const dictGroups: DictGroup[] = [];
 
   // From source variant to standard
@@ -60,9 +65,13 @@ function Converter(options: ConverterOptions): (input: string) => string {
   // From standard to cn (always needed)
   dictGroups.push([TSCharacters, TSPhrases]);
 
-  return ConverterFactory(...dictGroups);
+  let convert = ConverterFactory(...dictGroups);
+  if (protectedDict) {
+    convert = ProtectedConverter(protectedDict, convert);
+  }
+  return convert;
 }
 
-export { Converter, CustomConverter, ConverterFactory, HTMLConverter, Trie };
+export { Converter, CustomConverter, ConverterFactory, ProtectedConverter, parseOpenCCDict, HTMLConverter, Trie };
 
 export type { ConverterOptions, HTMLConverterOptions, DictLike, DictGroup };

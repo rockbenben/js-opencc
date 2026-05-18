@@ -3,7 +3,7 @@
  */
 
 // Core exports
-export { Trie, ConverterFactory, CustomConverter } from "./core.js";
+export { Trie, ConverterFactory, CustomConverter, ProtectedConverter, parseOpenCCDict } from "./core.js";
 export type { DictLike, DictGroup } from "./core.js";
 
 // Converter exports

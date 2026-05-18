@@ -3,17 +3,15 @@
  * Smaller bundle size for one-way conversion
  */
 
-import { Trie, ConverterFactory, CustomConverter, DictLike } from "../core.js";
+import { Trie, ConverterFactory, CustomConverter, ProtectedConverter, parseOpenCCDict, DictLike } from "../core.js";
 import { HTMLConverter, HTMLConverterOptions } from "../html-converter.js";
-import { standard2variants, LocaleCode } from "../presets.js";
+import { standard2variants } from "../presets.js";
 
 // Import only the dictionaries needed for cn -> t/tw/twp/hk
 import STCharacters from "../dict/STCharacters.js";
 import STPhrases from "../dict/STPhrases.js";
 import TWVariants from "../dict/TWVariants.js";
-import TWPhrasesIT from "../dict/TWPhrasesIT.js";
-import TWPhrasesName from "../dict/TWPhrasesName.js";
-import TWPhrasesOther from "../dict/TWPhrasesOther.js";
+import TWPhrases from "../dict/TWPhrases.js";
 import HKVariants from "../dict/HKVariants.js";
 import JPVariants from "../dict/JPVariants.js";
 
@@ -31,17 +29,24 @@ const dictMap: Record<string, string> = {
   STCharacters,
   STPhrases,
   TWVariants,
-  TWPhrasesIT,
-  TWPhrasesName,
-  TWPhrasesOther,
+  TWPhrases,
   HKVariants,
   JPVariants,
 };
 
 /**
- * Create a converter from Simplified Chinese to Traditional variants
+ * Create a converter from Simplified Chinese to Traditional variants.
+ *
+ * @param options - Conversion options (locale)
+ * @param protectedDict - Optional hard-override dictionary. Matches are masked
+ *   with PUA placeholders before built-in conversion, then restored after —
+ *   OpenCC dictionaries never see or modify them. Highest priority.
+ *
+ *   UMD bundles do NOT auto-load `data/custom/ProtectedDict.txt` (no fs
+ *   access in browsers). Pass the dict explicitly. To load from a remote URL,
+ *   `fetch` the text and use `parseOpenCCDict()`.
  */
-function Converter(options: ConverterOptions): (input: string) => string {
+function Converter(options: ConverterOptions, protectedDict?: DictLike): (input: string) => string {
   const dictGroups: DictGroup[] = [];
 
   // From cn to standard (always needed)
@@ -56,9 +61,13 @@ function Converter(options: ConverterOptions): (input: string) => string {
     }
   }
 
-  return ConverterFactory(...dictGroups);
+  let convert = ConverterFactory(...dictGroups);
+  if (protectedDict) {
+    convert = ProtectedConverter(protectedDict, convert);
+  }
+  return convert;
 }
 
-export { Converter, CustomConverter, ConverterFactory, HTMLConverter, Trie };
+export { Converter, CustomConverter, ConverterFactory, ProtectedConverter, parseOpenCCDict, HTMLConverter, Trie };
 
 export type { ConverterOptions, HTMLConverterOptions, DictLike, DictGroup };
