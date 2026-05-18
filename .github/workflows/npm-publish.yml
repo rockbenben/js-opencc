@@ -4,9 +4,14 @@ on:
   release:
     types: [created]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       id-token: write # Required for OIDC trusted publishing
@@ -23,9 +28,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Sync dictionaries
-        run: npm run sync:opencc
-
+      # `npm run build` already runs `sync:opencc` as its first step, so we
+      # don't need a separate sync step. Building from a release commit always
+      # rebuilds fresh dicts from upstream — the committed manifest is only
+      # used by the sync workflow for change detection.
       - name: Build
         run: npm run build
 
@@ -33,4 +39,8 @@ jobs:
         run: npm test
 
       - name: Publish to NPM
-        run: npm publish --provenance --access public
+        # --ignore-scripts skips prepublishOnly, which would otherwise re-run
+        # `npm run build && npm test` on top of the explicit steps above.
+        # prepublishOnly is intentionally kept as a safety net for manual
+        # `npm publish` from a developer's workstation.
+        run: npm publish --provenance --access public --ignore-scripts

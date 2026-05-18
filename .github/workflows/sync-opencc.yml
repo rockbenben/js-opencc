@@ -2,16 +2,28 @@ name: Sync OpenCC Dictionaries
 
 on:
   schedule:
-    # Run weekly on Sunday at 00:00 UTC
-    - cron: "0 0 * * 0"
-  workflow_dispatch: # Allow manual trigger
+    # Biweekly: 1st and 15th of each month at 00:00 UTC.
+    # (cron has no native "every 2 weeks"; two fixed monthly anchors is the
+    # standard equivalent — ~14-day cadence, deterministic, no week-parity hacks.)
+    - cron: "0 0 1,15 * *"
+  workflow_dispatch: # Manual trigger
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write   # commit version bump, push tag
+      issues: write     # open issue on failure
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -25,30 +37,98 @@ jobs:
       - name: Sync dictionaries from OpenCC
         run: npm run sync:opencc
 
-      - name: Build
-        run: npm run build
-
-      - name: Run tests
-        run: npm test
-
-      - name: Check for changes
+      - name: Check for dictionary changes
         id: check_changes
         run: |
-          if [[ -n $(git status --porcelain) ]]; then
+          # src/dict/ and data/official/ are gitignored (generated content), so
+          # `git status` would never see sync output. We watch the tracked
+          # `.opencc-sync.json` manifest instead — it stores content hashes of
+          # upstream dict files and only changes when upstream changes.
+          if [[ -n $(git status --porcelain .opencc-sync.json) ]]; then
             echo "changes=true" >> $GITHUB_OUTPUT
+            echo "Detected upstream OpenCC dict changes:"
+            git --no-pager diff .opencc-sync.json || cat .opencc-sync.json
           else
             echo "changes=false" >> $GITHUB_OUTPUT
+            echo "No upstream OpenCC dict changes — exiting cleanly."
           fi
 
-      - name: Create Pull Request
+      - name: Build (dist only — sync ran above)
         if: steps.check_changes.outputs.changes == 'true'
-        uses: peter-evans/create-pull-request@v5
-        with:
-          commit-message: "chore: sync dictionaries from OpenCC"
-          title: "📚 Sync dictionaries from OpenCC"
-          body: |
-            This PR updates the dictionaries from the official OpenCC repository.
+        run: npm run build:dist
 
-            Triggered by: Scheduled weekly sync / Manual trigger
-          branch: sync-opencc-dictionaries
-          delete-branch: true
+      - name: Run tests
+        if: steps.check_changes.outputs.changes == 'true'
+        run: npm test
+
+      - name: Configure git
+        if: steps.check_changes.outputs.changes == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump patch version
+        if: steps.check_changes.outputs.changes == 'true'
+        id: bump
+        run: |
+          # npm version patch returns "v2.0.1" (with leading v)
+          NEW_TAG=$(npm version patch --no-git-tag-version)
+          echo "tag=$NEW_TAG" >> $GITHUB_OUTPUT
+          echo "Bumped to $NEW_TAG"
+
+      - name: Commit, tag, push
+        if: steps.check_changes.outputs.changes == 'true'
+        run: |
+          git add .opencc-sync.json package.json package-lock.json
+          git commit -m "chore: biweekly OpenCC sync ${{ steps.bump.outputs.tag }}"
+          git tag ${{ steps.bump.outputs.tag }}
+          # Push the bump commit first, then the lightweight tag explicitly.
+          # `--follow-tags` only pushes annotated tags; an unpushed tag would
+          # cause action-gh-release to create the release on the old GITHUB_SHA
+          # (pre-bump) instead of our new commit.
+          git push origin HEAD:main
+          git push origin ${{ steps.bump.outputs.tag }}
+
+      - name: Create GitHub Release (triggers npm-publish workflow)
+        if: steps.check_changes.outputs.changes == 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.bump.outputs.tag }}
+          name: ${{ steps.bump.outputs.tag }}
+          body: |
+            Automated biweekly sync from upstream OpenCC (master branch).
+
+            The committed change is the `.opencc-sync.json` manifest (content
+            hashes of upstream dict files). The actual dict source/generated
+            files (`data/official/`, `src/dict/`) are gitignored and rebuilt
+            from upstream by the `Publish to NPM` workflow before publishing.
+
+            Published to npm by the `Publish to NPM` workflow triggered by this release.
+
+      - name: Open issue on failure
+        if: failure()
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const today = new Date().toISOString().split('T')[0];
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title = `Biweekly OpenCC sync failed (${today})`;
+            const body = [
+              `The biweekly OpenCC sync workflow failed on ${new Date().toISOString()}.`,
+              ``,
+              `**Workflow run:** ${runUrl}`,
+              ``,
+              `Common causes:`,
+              `- Upstream OpenCC restructured dictionary files (a sync script update may be needed)`,
+              `- A new dictionary file was added that needs to be added to the bundle imports`,
+              `- Tests are catching a regression from new dict data`,
+              ``,
+              `Please inspect the workflow logs and either fix the sync script / dict references, or revert the offending upstream change manually.`,
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['automation', 'sync-failure']
+            });
