@@ -2,7 +2,10 @@ name: Publish to NPM
 
 on:
   release:
-    types: [created]
+    # `published` fires only when a release is actually made public — `created`
+    # would also fire for drafts, so a manually-prepared draft release could
+    # publish to npm before review.
+    types: [published]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -44,3 +47,22 @@ jobs:
         # prepublishOnly is intentionally kept as a safety net for manual
         # `npm publish` from a developer's workstation.
         run: npm publish --provenance --access public --ignore-scripts
+
+      - name: Trigger npmmirror sync
+        # Best-effort: the package is already on npm at this point, so a failure
+        # here must NOT mark the release run as failed. npmmirror's daily sync
+        # is the fallback; this just shortens the lag from hours to seconds.
+        continue-on-error: true
+        run: |
+          PKG=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          echo "Requesting npmmirror sync for ${PKG}@${VERSION}"
+          RESP=$(curl -fsS --retry 3 --retry-delay 5 -X PUT \
+            "https://registry.npmmirror.com/-/package/${PKG}/syncs" \
+            -H 'Content-Type: application/json' \
+            -d '{"force":true}')
+          echo "$RESP"
+          LOG_ID=$(node -e "try{process.stdout.write(JSON.parse(process.argv[1]).logId||'')}catch(e){}" "$RESP")
+          if [ -n "$LOG_ID" ]; then
+            echo "Sync log: https://registry.npmmirror.com/-/package/${PKG}/syncs/${LOG_ID}/log"
+          fi
