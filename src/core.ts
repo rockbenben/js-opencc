@@ -52,7 +52,13 @@ export class Trie {
     if (typeof dict === "string") {
       const entries = dict.split("|");
       for (const entry of entries) {
-        const [key, value] = entry.split(" ");
+        // Split on the FIRST space only: the key is one token, but a value may
+        // itself contain spaces (e.g. multi-word replacements). Splitting on
+        // every space would silently drop everything after the first value token.
+        const sep = entry.indexOf(" ");
+        if (sep < 0) continue;
+        const key = entry.slice(0, sep);
+        const value = entry.slice(sep + 1);
         if (key && value) {
           this.addWord(key, value);
         }

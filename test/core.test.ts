@@ -35,6 +35,16 @@ describe("Trie", () => {
     expect(trie.convert("电脑和手机")).toBe("電腦和手機");
   });
 
+  // Regression (B6): string-form values may contain spaces. Splitting on every
+  // space would drop everything after the first value token.
+  it("should keep multi-token values intact when loading from string", () => {
+    const trie = new Trie();
+    trie.loadDict("AB alpha beta|C gamma");
+
+    expect(trie.convert("AB")).toBe("alpha beta");
+    expect(trie.convert("C")).toBe("gamma");
+  });
+
   it("should expose findLongestMatch primitive", () => {
     const trie = new Trie();
     trie.addWord("中国", "中國");
