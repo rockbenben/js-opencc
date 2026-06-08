@@ -6,6 +6,16 @@ on:
     # would also fire for drafts, so a manually-prepared draft release could
     # publish to npm before review.
     types: [published]
+  # Manual fallback for re-publishing without deleting/recreating a release
+  # (e.g. a release that was created by GITHUB_TOKEN and never triggered this
+  # workflow). Pick a tag and run — npm rejects an already-published version,
+  # so this is safe to re-run.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git tag to build & publish (e.g. v1.3.2). Blank = use the branch/ref selected above."
+        required: false
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -18,9 +28,15 @@ jobs:
     permissions:
       contents: read
       id-token: write # Required for OIDC trusted publishing
+      issues: write   # open an issue if an automated publish fails
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          # For `release` events this resolves to github.ref (the release tag),
+          # identical to the default. For `workflow_dispatch` with a `tag` input,
+          # check out that tag instead of the selected branch.
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -66,3 +82,64 @@ jobs:
           if [ -n "$LOG_ID" ]; then
             echo "Sync log: https://registry.npmmirror.com/-/package/${PKG}/syncs/${LOG_ID}/log"
           fi
+
+      - name: Open or update failure issue
+        # Only alert on the AUTOMATED path. A release published by the sync
+        # workflow has nobody watching, so a silent publish failure (e.g. upstream
+        # broke between sync and publish, or npm auth lapsed) would go unnoticed —
+        # exactly the class of bug where a release exists but npm never got the
+        # package. Manual `workflow_dispatch` runs are skipped: the operator sees
+        # the red run directly, and re-publishing an existing version fails by
+        # design (npm rejects duplicates) — that must not spam issues.
+        # The npmmirror step above is `continue-on-error`, so its failure never
+        # reaches here; only build/test/publish failures do.
+        if: failure() && github.event_name == 'release'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const today = new Date().toISOString().split('T')[0];
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const tag = context.payload.release?.tag_name || context.ref.replace('refs/tags/', '');
+
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'publish-failure',
+              per_page: 1,
+            });
+
+            if (existing.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.data[0].number,
+                body: `Another publish failed for **${tag}** on ${today}.\n\n**Workflow run:** ${runUrl}`,
+              });
+              return;
+            }
+
+            const body = [
+              `Publishing **${tag}** to npm failed on ${today}.`,
+              ``,
+              `**Workflow run:** ${runUrl}`,
+              ``,
+              `The GitHub release for \`${tag}\` exists, but the package is NOT on npm.`,
+              ``,
+              `Common causes:`,
+              `- Upstream OpenCC changed (broke a dict / test) between sync and publish`,
+              `- npm OIDC trusted-publishing / auth failure`,
+              `- A transient npm registry error`,
+              ``,
+              `**To recover:** re-run the publish manually — Actions → "Publish to NPM" → Run workflow → set \`tag\` to \`${tag}\`. npm rejects an already-published version, so re-running is safe.`,
+              ``,
+              `_Subsequent failures are appended as comments. Close this issue once \`${tag}\` is on npm._`,
+            ].join('\n');
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `npm publish failing`,
+              body,
+              labels: ['automation', 'publish-failure'],
+            });

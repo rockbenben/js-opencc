@@ -96,6 +96,14 @@ jobs:
         if: steps.check_changes.outputs.changes == 'true' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v3
         with:
+          # Must use a PAT, not the default GITHUB_TOKEN: GitHub deliberately
+          # suppresses workflow triggers for events raised by GITHUB_TOKEN
+          # (anti-recursion). A release created with GITHUB_TOKEN would NOT fire
+          # the `release: published` event that npm-publish.yml listens on, so
+          # the package would never reach npm. A PAT counts as a real identity
+          # and DOES trigger downstream workflows.
+          # RELEASE_PAT: fine-grained PAT scoped to this repo, Contents: write.
+          token: ${{ secrets.RELEASE_PAT }}
           tag_name: ${{ steps.bump.outputs.tag }}
           name: ${{ steps.bump.outputs.tag }}
           body: |
