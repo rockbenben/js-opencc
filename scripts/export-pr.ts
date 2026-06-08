@@ -140,6 +140,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("export:pr failed:", err.message);
+  console.error("export:pr failed:", err instanceof Error ? err.message : String(err));
   process.exit(1);
 });
