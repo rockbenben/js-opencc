@@ -184,10 +184,13 @@ async function main() {
     allEntries[fileName] = entries;
     officialContents[fileName] = content;
 
-    // Save optimized format to src/dict/
+    // Save optimized format to src/dict/. Use JSON.stringify (not manual
+    // quotes) so any `"`, `\`, or control char in upstream data is escaped —
+    // otherwise a single such char would emit a broken .ts file and fail the
+    // build (and silently halt the automated biweekly publish).
     const optimized = entriesToOptimized(entries);
     const dictPath = path.join(dictDir, `${fileName}.ts`);
-    fs.writeFileSync(dictPath, `export default "${optimized}";\n`, "utf-8");
+    fs.writeFileSync(dictPath, `export default ${JSON.stringify(optimized)};\n`, "utf-8");
 
     console.log(`    ✓ ${fileName} (${entries.length} entries)`);
   }
@@ -203,10 +206,10 @@ async function main() {
 
     const entries = reverseEntries(srcEntries);
 
-    // Save reverse dict
+    // Save reverse dict (JSON.stringify escapes any special chars — see above).
     const optimized = entriesToOptimized(entries);
     const dictPath = path.join(dictDir, `${revName}.ts`);
-    fs.writeFileSync(dictPath, `export default "${optimized}";\n`, "utf-8");
+    fs.writeFileSync(dictPath, `export default ${JSON.stringify(optimized)};\n`, "utf-8");
 
     console.log(`    ✓ ${revName} (${entries.length} entries, from ${srcName})`);
   }
@@ -227,7 +230,7 @@ async function main() {
         const entries = parseToEntries(content);
         const optimized = entriesToOptimized(entries);
         const dictPath = path.join(dictDir, `${name}.ts`);
-        fs.writeFileSync(dictPath, `export default "${optimized}";\n`, "utf-8");
+        fs.writeFileSync(dictPath, `export default ${JSON.stringify(optimized)};\n`, "utf-8");
         allDictNames.push(name);
         console.log(`    ✓ ${name} (${entries.length} entries)`);
       } else {
