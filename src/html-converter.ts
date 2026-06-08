@@ -18,9 +18,16 @@ export interface HTMLConverterOptions {
 }
 
 /**
- * Tags that should not be converted
+ * Tags that should not be converted. INPUT is handled separately (below) rather
+ * than skipped wholesale, so button-like inputs still get their label converted.
  */
-const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "TEXTAREA", "INPUT", "CODE", "PRE"]);
+const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "TEXTAREA", "CODE", "PRE"]);
+
+/**
+ * INPUT types whose `value` is a display label worth converting. Editable
+ * inputs (text/password/search/…) hold user data and are left untouched.
+ */
+const CONVERTIBLE_INPUT_TYPES = new Set(["button", "submit", "reset"]);
 
 /**
  * Class name to ignore conversion
@@ -43,6 +50,18 @@ export function HTMLConverter(options: HTMLConverterOptions) {
    * Convert all text nodes in the DOM
    */
   function convert(): void {
+    const fromLangLower = fromLangTag.toLowerCase();
+
+    // Record the pre-conversion value exactly once per node. Repeated convert()
+    // calls then re-convert from the stored original instead of from
+    // already-converted text, and restore() always returns the true original.
+    function originalOf(node: Node, current: string): string {
+      if (!originalValues.has(node)) {
+        originalValues.set(node, current);
+      }
+      return originalValues.get(node)!;
+    }
+
     function processNode(node: Node, langMatched: boolean): void {
       // Skip elements with ignore-opencc class
       if (node instanceof Element && node.classList.contains(IGNORE_CLASS)) {
@@ -51,17 +70,30 @@ export function HTMLConverter(options: HTMLConverterOptions) {
 
       // Check and update lang attribute
       if (node instanceof Element) {
+        // lang matching is case-insensitive per the HTML spec (zh-CN == zh-cn).
         const lang = node.getAttribute("lang");
-        if (lang === fromLangTag) {
+        if (lang !== null && lang.toLowerCase() === fromLangLower) {
           langMatched = true;
           node.setAttribute("lang", toLangTag);
           changedLangNodes.add(node);
-        } else if (lang && lang.length > 0) {
+        } else if (lang !== null) {
+          // Any explicit, non-matching lang (including lang="") breaks the
+          // inherited match from an ancestor.
           langMatched = false;
         }
 
         // Skip certain tags
         if (SKIP_TAGS.has(node.tagName)) {
+          return;
+        }
+
+        // INPUT is a void element: convert button-like labels, then stop —
+        // it has no child text nodes to recurse into.
+        if (node.tagName === "INPUT") {
+          const input = node as HTMLInputElement;
+          if (langMatched && CONVERTIBLE_INPUT_TYPES.has(input.type)) {
+            input.value = converter(originalOf(input, input.value));
+          }
           return;
         }
 
@@ -72,20 +104,14 @@ export function HTMLConverter(options: HTMLConverterOptions) {
             if (name === "description" || name === "keywords") {
               const content = node.getAttribute("content");
               if (content) {
-                originalValues.set(node, content);
-                node.setAttribute("content", converter(content));
+                node.setAttribute("content", converter(originalOf(node, content)));
               }
             }
           } else if (node.tagName === "IMG") {
             const alt = node.getAttribute("alt");
             if (alt) {
-              originalValues.set(node, alt);
-              node.setAttribute("alt", converter(alt));
+              node.setAttribute("alt", converter(originalOf(node, alt)));
             }
-          } else if (node.tagName === "INPUT" && (node as HTMLInputElement).type === "button") {
-            const input = node as HTMLInputElement;
-            originalValues.set(node, input.value);
-            input.value = converter(input.value);
           }
         }
       }
@@ -95,8 +121,7 @@ export function HTMLConverter(options: HTMLConverterOptions) {
         if (child.nodeType === Node.TEXT_NODE && langMatched) {
           const text = child.nodeValue;
           if (text) {
-            originalValues.set(child, text);
-            child.nodeValue = converter(text);
+            child.nodeValue = converter(originalOf(child, text));
           }
         } else if (child.nodeType === Node.ELEMENT_NODE) {
           processNode(child, langMatched);
