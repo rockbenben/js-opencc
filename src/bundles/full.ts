@@ -29,6 +29,15 @@ interface ConverterOptions {
  *   OpenCC-format text fetched at runtime.
  */
 function Converter(options: ConverterOptions, protectedDict?: DictLike): (input: string) => string {
+  // Reject unknown locales loudly rather than silently skipping a step and
+  // returning partially-converted text (JS callers bypass the TS type check).
+  if (options.from !== "t" && !variants2standard[options.from]) {
+    throw new Error(`Unknown 'from' locale: ${options.from}`);
+  }
+  if (options.to !== "t" && !standard2variants[options.to]) {
+    throw new Error(`Unknown 'to' locale: ${options.to}`);
+  }
+
   const dictGroups: DictGroup[] = [];
 
   // From variant to standard

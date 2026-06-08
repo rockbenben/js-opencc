@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { createConverter } from "../src/converter.js";
+import { createConverter, getDictFiles } from "../src/converter.js";
+import type { LocaleCode } from "../src/converter.js";
 
 describe("createConverter", () => {
   it("should convert cn to tw", async () => {
@@ -19,6 +20,40 @@ describe("createConverter", () => {
 
     // CNTWPhrases should also be loaded for twp: 幼儿园 -> 幼稚園
     expect(convert("幼儿园")).toBe("幼稚園");
+  });
+
+  // Regression: phrase dictionaries with SIMPLIFIED keys (STPhrases) must apply.
+  // The per-file grouping bug ran STCharacters first, char-converting the source
+  // before STPhrases could match its simplified keys, so every one-to-many char
+  // resolved by its first character-dict value (头发→頭發 instead of 頭髮). The
+  // "cn to twp" test above did NOT catch this because TWPhrases keys are
+  // Traditional and survive the char step — only cn-side STPhrases is affected.
+  it("should apply STPhrases for context-sensitive one-to-many characters (cn to t)", async () => {
+    const convert = await createConverter({ from: "cn", to: "t" }, []);
+    expect(convert("头发")).toBe("頭髮"); // not 頭發
+    expect(convert("理发店")).toBe("理髮店"); // not 理發店
+    expect(convert("干燥")).toBe("乾燥"); // not 幹燥
+    expect(convert("复杂")).toBe("複雜"); // not 復雜
+    expect(convert("皇后")).toBe("皇后"); // 后 stays, not 後
+  });
+
+  it("should apply TSPhrases on t2s (乾隆 stays, not 干隆)", async () => {
+    const convert = await createConverter({ from: "t", to: "cn" }, []);
+    expect(convert("乾隆皇帝")).toBe("乾隆皇帝"); // TSPhrases protects 乾隆
+    expect(convert("頭髮")).toBe("头发");
+  });
+
+  // protectedDict (outermost masking layer) and the phrase dictionaries are
+  // orthogonal: a protected term is masked verbatim while the REST of the text
+  // still gets correct phrase conversion, and a protected mapping overrides what
+  // the phrase dict would otherwise produce.
+  it("should apply protectedDict and STPhrases together (orthogonal layers)", async () => {
+    // 头发 protected (kept simplified), 干燥 still phrase-converts to 乾燥
+    const keep = await createConverter({ from: "cn", to: "t" }, [["头发", "头发"]]);
+    expect(keep("头发干燥")).toBe("头发乾燥");
+    // protectedDict wins over the phrase dict for the same term (乾燥 → 幹燥)
+    const override = await createConverter({ from: "cn", to: "t" }, [["干燥", "幹燥"]]);
+    expect(override("干燥")).toBe("幹燥");
   });
 
   it("should convert tw to cn", async () => {
@@ -78,5 +113,31 @@ describe("createConverter", () => {
     // Passing [] explicitly bypasses auto-load and disables protection.
     const convert = await createConverter({ from: "cn", to: "tw" }, []);
     expect(convert("汉语")).toBe("漢語");
+  });
+});
+
+describe("getDictFiles", () => {
+  // The return type is string[][] (GROUPED by conversion step), not a flat
+  // string[]. A flat list invites `ConverterFactory(...files.map(f => [f]))`,
+  // which runs each file as its own trie sequentially and kills every phrase
+  // dictionary (头发→頭發). The grouped shape makes the correct usage natural.
+  it("groups each conversion step's files together (char + phrase in one group)", () => {
+    // cn→t: single step (variant→standard); STCharacters + STPhrases MUST share a group
+    expect(getDictFiles("cn", "t")).toEqual([["STCharacters", "STPhrases"]]);
+    // cn→tw: two steps (cn→standard, standard→tw)
+    expect(getDictFiles("cn", "tw")).toEqual([["STCharacters", "STPhrases"], ["TWVariants"]]);
+    // t→cn: single step (standard→cn)
+    expect(getDictFiles("t", "cn")).toEqual([["TSCharacters", "TSPhrases"]]);
+    // the char dict and its phrase dict are never split into separate groups
+    expect(getDictFiles("cn", "t")[0]).toContain("STPhrases");
+  });
+
+  // Regression (B5): an unknown locale must throw, not silently drop the step
+  // and return a converter that leaves text partially/un-converted.
+  it("throws on an unknown locale instead of silently skipping the step", async () => {
+    const bad = "xx" as unknown as LocaleCode;
+    expect(() => getDictFiles(bad, "t")).toThrow(/Unknown 'from' locale/);
+    expect(() => getDictFiles("cn", bad)).toThrow(/Unknown 'to' locale/);
+    await expect(createConverter({ from: bad, to: "t" }, [])).rejects.toThrow(/Unknown 'from' locale/);
   });
 });

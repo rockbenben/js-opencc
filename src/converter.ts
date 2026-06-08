@@ -55,20 +55,44 @@ export function ConverterBuilder(localePreset: LocalePreset) {
 }
 
 /**
- * Get dictionary file list for a conversion direction
+ * Dictionary files for a conversion, GROUPED BY CONVERSION STEP.
+ *
+ * Returns `string[][]`: each inner array is one conversion step
+ * (variant→standard, then standard→variant). Each step MUST be loaded into a
+ * SINGLE merged trie so the trie's longest-match lets phrase dictionaries
+ * (STPhrases, *RevPhrases) win over single-character dictionaries.
+ *
+ * Correct usage:
+ *   ConverterFactory(...getDictFiles(from, to).map(group => buildTrieFromGroup(group)))
+ *
+ * Do NOT flatten the groups and run each file as its own group — that converts
+ * characters first, so the phrase dict's source keys no longer exist and every
+ * phrase dictionary becomes dead code (头发→頭發 instead of 頭髮). That flat-list
+ * mental model is exactly what this grouped return type exists to prevent. If you
+ * only need the flat file list (e.g. to know which dict files to bundle), call
+ * `getDictFiles(from, to).flat()`.
+ *
+ * @throws {Error} if `from` or `to` is an unknown locale (i.e. not `'t'` and not
+ *   a key of `variants2standard` / `standard2variants`).
  */
-export function getDictFiles(from: LocaleCode, to: LocaleCode): string[] {
-  const files: string[] = [];
+export function getDictFiles(from: LocaleCode, to: LocaleCode): string[][] {
+  const groups: string[][] = [];
 
   if (from !== "t") {
-    files.push(...(variants2standard[from] || []));
+    const fromFiles = variants2standard[from];
+    // Reject unknown locales loudly instead of silently producing a converter
+    // that skips the step (which would return partially/un-converted text).
+    if (!fromFiles) throw new Error(`Unknown 'from' locale: ${from}`);
+    if (fromFiles.length) groups.push(fromFiles);
   }
 
   if (to !== "t") {
-    files.push(...(standard2variants[to] || []));
+    const toFiles = standard2variants[to];
+    if (!toFiles) throw new Error(`Unknown 'to' locale: ${to}`);
+    if (toFiles.length) groups.push(toFiles);
   }
 
-  return files;
+  return groups;
 }
 
 /**
@@ -122,7 +146,6 @@ export async function createConverter(
   if (!protectedDict) {
     protectedDict = await tryLoadPackageProtectedDict();
   }
-  const dictFiles = getDictFiles(options.from, options.to);
   const dictGroups: DictGroup[] = [];
 
   const dictModules = await import("./dict/index.js");
@@ -138,14 +161,25 @@ export async function createConverter(
     });
   };
 
-  // (a) Built-in ST/TS/HK/JP dictionaries
-  for (const fileName of dictFiles) {
-    const dict = loadDictFromModule(fileName);
-    if (dict) {
-      dictGroups.push([dict]);
-    } else {
-      console.warn(`Dictionary ${fileName} not found. Run 'npm run sync:opencc' first.`);
+  // (a) Built-in dictionaries — loaded per conversion-step group from
+  // getDictFiles. Each step is ONE merged trie so the trie's longest-match lets
+  // phrase dictionaries win over single-char dictionaries; running each file as
+  // its own group converts chars first and leaves the phrase dict's simplified
+  // source keys gone (头发→頭發 instead of 頭髮). getDictFiles returns the groups
+  // already shaped correctly — this loop just turns file names into dicts.
+  const loadGroup = (files: string[]): DictGroup => {
+    const group: DictLike[] = [];
+    for (const name of files) {
+      const dict = loadDictFromModule(name);
+      if (dict) group.push(dict);
+      else console.warn(`Dictionary ${name} not found. Run 'npm run sync:opencc' first.`);
     }
+    return group;
+  };
+
+  for (const fileGroup of getDictFiles(options.from, options.to)) {
+    const group = loadGroup(fileGroup);
+    if (group.length) dictGroups.push(group);
   }
 
   // (b) CNTWPhrases (ordinary vocabulary dict, stays in main chain)
