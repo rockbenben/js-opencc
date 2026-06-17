@@ -13,7 +13,7 @@ import STPhrases from "../dict/STPhrases.js";
 import TWVariants from "../dict/TWVariants.js";
 import TWPhrases from "../dict/TWPhrases.js";
 import HKVariants from "../dict/HKVariants.js";
-import JPVariants from "../dict/JPVariants.js";
+import JPShinjitaiCharactersRev from "../dict/JPShinjitaiCharactersRev.js";
 
 type DictGroup = DictLike[];
 
@@ -31,7 +31,7 @@ const dictMap: Record<string, string> = {
   TWVariants,
   TWPhrases,
   HKVariants,
-  JPVariants,
+  JPShinjitaiCharactersRev,
 };
 
 /**

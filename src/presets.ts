@@ -22,7 +22,7 @@ export const variants2standard: Record<string, string[]> = {
   hk: ["HKVariantsRev", "HKVariantsRevPhrases"],
   tw: ["TWVariantsRev", "TWVariantsRevPhrases"],
   twp: ["TWVariantsRev", "TWVariantsRevPhrases", "TWPhrasesRev"],
-  jp: ["JPVariantsRev", "JPShinjitaiCharacters", "JPShinjitaiPhrases"],
+  jp: ["JPShinjitaiCharacters", "JPShinjitaiPhrases"],
 };
 
 /**
@@ -33,7 +33,7 @@ export const standard2variants: Record<string, string[]> = {
   hk: ["HKVariants"],
   tw: ["TWVariants"],
   twp: ["TWVariants", "TWPhrases"],
-  jp: ["JPVariants"],
+  jp: ["JPShinjitaiCharactersRev"],
 };
 
 /**

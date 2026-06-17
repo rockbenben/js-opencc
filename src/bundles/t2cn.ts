@@ -15,7 +15,6 @@ import TWVariantsRevPhrases from "../dict/TWVariantsRevPhrases.js";
 import TWPhrasesRev from "../dict/TWPhrasesRev.js";
 import HKVariantsRev from "../dict/HKVariantsRev.js";
 import HKVariantsRevPhrases from "../dict/HKVariantsRevPhrases.js";
-import JPVariantsRev from "../dict/JPVariantsRev.js";
 import JPShinjitaiCharacters from "../dict/JPShinjitaiCharacters.js";
 import JPShinjitaiPhrases from "../dict/JPShinjitaiPhrases.js";
 
@@ -37,7 +36,6 @@ const dictMap: Record<string, string> = {
   TWPhrasesRev,
   HKVariantsRev,
   HKVariantsRevPhrases,
-  JPVariantsRev,
   JPShinjitaiCharacters,
   JPShinjitaiPhrases,
 };
