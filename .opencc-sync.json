@@ -6,13 +6,13 @@
     "HKVariantsRevPhrases": "sha256:35352aef4833c2631b2144bc85623cc44d5a09221dda9c32178ea024300d34d3",
     "JPShinjitaiCharacters": "sha256:12cec7250b873ef52b36d8f92218d4f92c0aaf5d8cd7c58fe42d9785bdcdc43a",
     "JPShinjitaiPhrases": "sha256:799c9d69d78fcf96b35110693866bd34a070e4f50e6be55a4ecf8080cd2832d6",
-    "STCharacters": "sha256:81c27e6364fd164181276197b9215cf95f7f12a050aa207375248a5badf8d6fc",
-    "STPhrases": "sha256:8dccc61996085e0c4e947581c041ac639505e58866cc2eda16a4e2b74986ba4b",
+    "STCharacters": "sha256:a0ca1601c70648cf48b33c3c6210ccbecc5c7eead4b4c3daf76587ba2c03582b",
+    "STPhrases": "sha256:3c5068770fd2357baa5fe3ac874732d4ae0f34677afbb297e22802c3801f8900",
     "TSCharacters": "sha256:737c21c66f55a419dd6956cb3089476cdefc5a36877452631617696df1e5d925",
-    "TSPhrases": "sha256:99943207c8951b0263c92eb6caca4d962027f1d90f6108fb82c1990972ee3daa",
-    "TWPhrases": "sha256:8d6442e0cf60b0401ccd97d9c48e9fab08d13cbd63ff2ec57e26d1a880c1bbc7",
-    "TWPhrasesRev": "sha256:4294bf38f28390ee8d024d54bba9de45dc5c4882b7dd8cab2d6614f6b2440fbc",
+    "TSPhrases": "sha256:362fa1b9a7d6edd04b462a32e12c9fef3adae822ab1dee9c83561cc37c06cb1f",
+    "TWPhrases": "sha256:463e05cba1a6fec6c59a366069ccde06d17f077cddf423e9e47189a697510bb5",
+    "TWPhrasesRev": "sha256:c2d6ca23a98e180834e2f4f1224ab0fd98e09873726dc330a67ffe64f8e7d8c6",
     "TWVariants": "sha256:1413dc4de4884753ffd93a2b50463830931c78a27ad08885df46130f70603f74",
-    "TWVariantsRevPhrases": "sha256:fd0dd1b704971ed60cd3bc8eb8d76d1938399198bdfbcb0cd39e686ee890121b"
+    "TWVariantsRevPhrases": "sha256:deb8410d2ff9645e73f72a7a968fac5f14aad7a0d53a095aa06c2c1c01dd8a92"
   }
 }
