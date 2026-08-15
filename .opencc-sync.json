@@ -10,9 +10,9 @@
     "STPhrases": "sha256:3c5068770fd2357baa5fe3ac874732d4ae0f34677afbb297e22802c3801f8900",
     "TSCharacters": "sha256:737c21c66f55a419dd6956cb3089476cdefc5a36877452631617696df1e5d925",
     "TSPhrases": "sha256:362fa1b9a7d6edd04b462a32e12c9fef3adae822ab1dee9c83561cc37c06cb1f",
-    "TWPhrases": "sha256:463e05cba1a6fec6c59a366069ccde06d17f077cddf423e9e47189a697510bb5",
-    "TWPhrasesRev": "sha256:c2d6ca23a98e180834e2f4f1224ab0fd98e09873726dc330a67ffe64f8e7d8c6",
-    "TWVariants": "sha256:1413dc4de4884753ffd93a2b50463830931c78a27ad08885df46130f70603f74",
-    "TWVariantsRevPhrases": "sha256:deb8410d2ff9645e73f72a7a968fac5f14aad7a0d53a095aa06c2c1c01dd8a92"
+    "TWPhrases": "sha256:bcb435b744ee3e522beb9b18fcc5486a36ed4763c6aa642ce18112fb5d604e31",
+    "TWPhrasesRev": "sha256:2c13969308cf4b9216cfb0145cefb9da96c5d0329a393850c2a63b341caaf4bd",
+    "TWVariants": "sha256:e187278e119c427ca561180ac5da5b20e9f8681190458f35c327ce499e95a6a5",
+    "TWVariantsRevPhrases": "sha256:5ebfb4bdc938c2b14e01ace378988d5d3dc12462b3496ef1d424951ccd371256"
   }
 }
