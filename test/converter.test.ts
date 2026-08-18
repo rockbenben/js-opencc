@@ -126,8 +126,12 @@ describe("getDictFiles", () => {
   it("groups each conversion step's files together (char + phrase in one group)", () => {
     // cn→t: single step (variant→standard); STCharacters + STPhrases MUST share a group
     expect(getDictFiles("cn", "t")).toEqual([["STCharacters", "STPhrases"]]);
-    // cn→tw: two steps (cn→standard, standard→tw)
-    expect(getDictFiles("cn", "tw")).toEqual([["STCharacters", "STPhrases"], ["TWVariants"]]);
+    // cn→tw: two steps (cn→standard, standard→tw); TWVariantsPhrases rides in
+    // the same group as TWVariants so proper nouns win the longest match
+    expect(getDictFiles("cn", "tw")).toEqual([
+      ["STCharacters", "STPhrases"],
+      ["TWVariants", "TWVariantsPhrases"],
+    ]);
     // t→cn: single step (standard→cn)
     expect(getDictFiles("t", "cn")).toEqual([["TSCharacters", "TSPhrases"]]);
     // the char dict and its phrase dict are never split into separate groups
@@ -238,6 +242,44 @@ describe("reverse dict identity fallback", () => {
     const convert = await createConverter({ from: "tw", to: "t" }, []);
     expect(convert("梁先生")).toBe("梁先生"); // not 樑先生
     expect(convert("橋梁")).toBe("橋樑"); // phrase dict still wins in-context
+  });
+});
+
+// Regression: the presets skipped HKVariantsPhrases / TWVariantsPhrases, which
+// OpenCC's own t2hk / t2tw / s2twp / s2hkp chains include. They are the dicts
+// that stop proper nouns from being over-converted, so without them 264/272 of
+// HKVariantsPhrases and 12/12 of TWVariantsPhrases disagreed with OpenCC.
+describe("variant phrase dicts (OpenCC parity)", () => {
+  it("keeps proper nouns intact for t→tw", async () => {
+    const convert = await createConverter({ from: "t", to: "tw" }, []);
+    expect(convert("張棟樑")).toBe("張棟樑"); // not 張棟梁
+    expect(convert("林杰樑")).toBe("林杰樑");
+    expect(convert("純喫茶")).toBe("純喫茶"); // not 純吃茶
+    // the plain variant rule still applies outside those phrases
+    expect(convert("棟樑之材")).toBe("棟梁之材");
+  });
+
+  it("applies HK phrase variants for t→hk", async () => {
+    const convert = await createConverter({ from: "t", to: "hk" }, []);
+    expect(convert("仙姑峯")).toBe("仙姑峰");
+    expect(convert("一粥麪")).toBe("一粥麵");
+  });
+});
+
+// hkp mirrors twp: HK regional vocabulary on top of the hk variant chain,
+// matching OpenCC's s2hkp / hk2sp configs.
+describe("hkp locale", () => {
+  it("converts mainland vocabulary to HK usage", async () => {
+    const convert = await createConverter({ from: "cn", to: "hkp" }, []);
+    expect(convert("伍迪·艾伦")).toBe("活地·亞倫");
+    // plain hk must NOT do the vocabulary step
+    const plain = await createConverter({ from: "cn", to: "hk" }, []);
+    expect(plain("伍迪·艾伦")).toBe("伍迪·艾倫");
+  });
+
+  it("round-trips HK vocabulary back to mainland", async () => {
+    const convert = await createConverter({ from: "hkp", to: "cn" }, []);
+    expect(convert("活地·亞倫")).toBe("伍迪·艾伦");
   });
 });
 

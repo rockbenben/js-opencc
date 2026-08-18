@@ -81,10 +81,10 @@ describe("cn2t / t2cn bundles", () => {
   // added to hk/jp by a future OpenCC sync would ship and throw at runtime with
   // a green suite. Constructing every accepted locale is that missing guard.
   it("one-way bundles carry dicts for every locale they accept", () => {
-    for (const to of ["t", "tw", "twp", "hk", "jp"] as const) {
+    for (const to of ["t", "tw", "twp", "hk", "hkp", "jp"] as const) {
       expect(() => Cn2t({ to }), `cn2t to:${to}`).not.toThrow();
     }
-    for (const from of ["t", "tw", "twp", "hk", "jp"] as const) {
+    for (const from of ["t", "tw", "twp", "hk", "hkp", "jp"] as const) {
       expect(() => T2cn({ from }), `t2cn from:${from}`).not.toThrow();
     }
   });

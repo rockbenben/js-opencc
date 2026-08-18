@@ -19,6 +19,8 @@ CNTWPhrases 的方向规则收拢到一处，反转词典的冲突策略修正�
 | `{ from: "twp", to: "cn" }("隨身碟")` | `优盘` | `U盘`（取首选词） |
 | `{ from: "hk", to: "t" }("人才")` | `人纔` | `人才` |
 | `{ from: "cn", to: "twp" }("扫二维码")` | `掃QR` | `掃QR Code` |
+| `{ from: "t", to: "tw" }("張棟樑")` | `張棟梁` | `張棟樑`（专名不再被拆） |
+| `{ from: "t", to: "hk" }("仙姑峯")` | `仙姑峯` | `仙姑峰` |
 | `T2cn({ from: "twp", to: "tw" })` | 静默返回简体 | 抛 `t2cn bundle only converts to 'cn'` |
 | `Cn2t({ to: "xx" })` | 静默返回半转换文本 | 抛 `Unknown 'to' locale` |
 
@@ -26,6 +28,8 @@ CNTWPhrases 的方向规则收拢到一处，反转词典的冲突策略修正�
 
 ### 新增
 
+- **补齐 OpenCC 官方转换链缺失的两本短语词典。** 官方 `t2tw` 用的是 `TWVariantsPhrases + TWVariants`、`t2hk` 用 `HKVariantsPhrases + HKVariants`，而我们只用了后者。这两本的作用是**防止专名被过度转换**——拿上游词典逐条实测，`t→tw` 12 条全错（`張棟樑` 被改成 `張棟梁`、`純喫茶` 变 `純吃茶`，人名和商号都被拆）、`t→hk` 272 条错 264 条（`仙姑峯` 应为 `仙姑峰`、`一粥麪` 应为 `一粥麵`）。补齐后三本词典与 OpenCC 的差异均为 **0 条**。`HKVariantsPhrases` 上游 2014 年就有，是我们一直缺；`TWVariantsPhrases` 是上游 2026-05-27 新增，同步脚本连续警告了三个月未被处理。
+- **新增 `hkp` 地区代码**（港式词汇模式，与 `twp` 对称），对应 OpenCC 2026-06 新增的 `s2hkp` / `hk2sp` 配置，链条为 `HKPhrases + HKVariantsPhrases + HKVariants`（反向 `HKPhrasesRev + HKVariantsRevPhrases + HKVariantsRev`）。例：`{ from: "cn", to: "hkp" }("伍迪·艾伦")` → `活地·亞倫`，而 `to: "hk"` 只做字形转换得 `伍迪·艾倫`。三个 UMD bundle 同步支持。
 - **UMD bundle（cn2t / t2cn / full）现在与 npm 主入口一样加载 CNTWPhrases**：twp 方向默认加载，`loadCustomPhrases: false` 可关。此前 bundle 完全不带这本词典，同样输入 `幼儿园`，主入口出 `幼稚園` 而 UMD 只做字符转换出 `幼兒園`。反转逻辑提取为 `core.ts` 的 `reverseDictString`，方向规则提取为 `presets.ts` 的 `phraseDictDirection`（converter 与三个 bundle 共用一份）。每个 bundle 体积 +0.9KB。
 
 ### 修复 · 转换结果
@@ -57,6 +61,7 @@ CNTWPhrases 的方向规则收拢到一处，反转词典的冲突策略修正�
 ### 开发 / CI
 
 - `entriesToOptimized` 新增打包格式守卫：key 含空格或任一侧含 `|` 时同步脚本直接报错，不再静默产出错位词典。
+- 同步脚本新增 `IGNORED_DICT_FILES`（目前只有 `CJK_Compatibility_Ideographs`，不属于任何 OpenCC 转换链）。此前上游新增文件会与"故意不要的文件"混在一起报同一条警告，`OFFICIAL_DICT_FILES is in sync with upstream` 因此从未出现过，警告也就失去了意义。
 - 新增 `test/bundles.test.ts`；回归测试覆盖多 token 值往返、反转恒等回退、bundle 未知 locale 抛错、bundle 不支持的方向抛错、原型链成员当 locale 传入被拒、单向 bundle 对其全部可接受 locale 都带齐字典、full bundle 字典完整性、CNTWPhrases 方向规则（含主入口与 bundle 一致性）、反转词典的冲突与分隔符处理。
 - 单向 bundle 的方向在编译期已确定（`cn2t` 只可能正向、`t2cn` 只可能反向），移除各自那条永不执行的分支——`cn2t` 因此不再引入 `reverseDictString`。
 - README / README_TW 的 CDN 示例此前把三个 bundle 的 `<script>` 并排列出后调用 `OpenCC.Converter({ from: "cn", to: "tw" })`：最后加载的 t2cn 覆盖全局 `OpenCC`，而 t2cn 根本不支持 `from: "cn"`——照抄此前会静默返回未转换的原文，现在会抛 `t2cn bundle only converts to 'cn', got 'tw'`。改为每个 bundle 各自独立示例并说明只能引入一个；同时补充 CNTWPhrases 的方向说明。

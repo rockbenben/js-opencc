@@ -15,6 +15,7 @@ import TWVariantsRevPhrases from "../dict/TWVariantsRevPhrases.js";
 import TWPhrasesRev from "../dict/TWPhrasesRev.js";
 import HKVariantsRev from "../dict/HKVariantsRev.js";
 import HKVariantsRevPhrases from "../dict/HKVariantsRevPhrases.js";
+import HKPhrasesRev from "../dict/HKPhrasesRev.js";
 import JPShinjitaiCharacters from "../dict/JPShinjitaiCharacters.js";
 import JPShinjitaiPhrases from "../dict/JPShinjitaiPhrases.js";
 import CNTWPhrases from "../dict/CNTWPhrases.js";
@@ -22,7 +23,7 @@ import CNTWPhrases from "../dict/CNTWPhrases.js";
 type DictGroup = DictLike[];
 
 // Available source locales for t2cn
-type SourceLocale = "t" | "tw" | "twp" | "hk" | "jp";
+type SourceLocale = "t" | "tw" | "twp" | "hk" | "hkp" | "jp";
 
 interface ConverterOptions {
   from: SourceLocale;
@@ -39,6 +40,7 @@ const dictMap: Record<string, string> = {
   TWPhrasesRev,
   HKVariantsRev,
   HKVariantsRevPhrases,
+  HKPhrasesRev,
   JPShinjitaiCharacters,
   JPShinjitaiPhrases,
 };

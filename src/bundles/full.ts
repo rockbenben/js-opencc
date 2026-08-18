@@ -13,9 +13,13 @@ import STPhrases from "../dict/STPhrases.js";
 import TSCharacters from "../dict/TSCharacters.js";
 import TSPhrases from "../dict/TSPhrases.js";
 import HKVariants from "../dict/HKVariants.js";
+import HKVariantsPhrases from "../dict/HKVariantsPhrases.js";
 import HKVariantsRev from "../dict/HKVariantsRev.js";
 import HKVariantsRevPhrases from "../dict/HKVariantsRevPhrases.js";
+import HKPhrases from "../dict/HKPhrases.js";
+import HKPhrasesRev from "../dict/HKPhrasesRev.js";
 import TWVariants from "../dict/TWVariants.js";
+import TWVariantsPhrases from "../dict/TWVariantsPhrases.js";
 import TWVariantsRev from "../dict/TWVariantsRev.js";
 import TWVariantsRevPhrases from "../dict/TWVariantsRevPhrases.js";
 import TWPhrases from "../dict/TWPhrases.js";
@@ -31,9 +35,13 @@ const dict: Record<string, string> = {
   TSCharacters,
   TSPhrases,
   HKVariants,
+  HKVariantsPhrases,
   HKVariantsRev,
   HKVariantsRevPhrases,
+  HKPhrases,
+  HKPhrasesRev,
   TWVariants,
+  TWVariantsPhrases,
   TWVariantsRev,
   TWVariantsRevPhrases,
   TWPhrases,

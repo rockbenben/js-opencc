@@ -18,7 +18,10 @@ const OPENCC_BASE_URL = "https://raw.githubusercontent.com/BYVoid/OpenCC/master/
 
 // Dictionary files available in OpenCC official repo (based on API check)
 const OFFICIAL_DICT_FILES = [
+  "HKPhrases",
+  "HKPhrasesRev",
   "HKVariants",
+  "HKVariantsPhrases",
   "HKVariantsRevPhrases",
   "JPShinjitaiCharacters",
   "JPShinjitaiPhrases",
@@ -29,8 +32,16 @@ const OFFICIAL_DICT_FILES = [
   "TWPhrases",
   "TWPhrasesRev",
   "TWVariants",
+  "TWVariantsPhrases",
   "TWVariantsRevPhrases",
 ];
+
+/**
+ * Upstream files we knowingly do NOT ship, so the discovery warning below stays
+ * meaningful. `CJK_Compatibility_Ideographs` normalizes Unicode compatibility
+ * ideographs and is not part of any OpenCC conversion_chain.
+ */
+const IGNORED_DICT_FILES = ["CJK_Compatibility_Ideographs"];
 
 // Reverse dictionaries to generate (not available in OpenCC, need to create from forward dicts)
 const REVERSE_DICT_MAPPINGS: Record<string, string> = {
@@ -165,7 +176,7 @@ async function main() {
   console.log("Discovering upstream dict files via GitHub API...");
   const upstreamFiles = await listUpstreamDictFiles();
   if (upstreamFiles) {
-    const known = new Set(OFFICIAL_DICT_FILES);
+    const known = new Set([...OFFICIAL_DICT_FILES, ...IGNORED_DICT_FILES]);
     const upstream = new Set(upstreamFiles);
     const added = upstreamFiles.filter((f) => !known.has(f));
     const removed = OFFICIAL_DICT_FILES.filter((f) => !upstream.has(f));

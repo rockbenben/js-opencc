@@ -9,30 +9,44 @@
  * - tw: Traditional Chinese (Taiwan)
  * - twp: Traditional Chinese (Taiwan) with phrase conversion
  * - hk: Traditional Chinese (Hong Kong)
+ * - hkp: Traditional Chinese (Hong Kong) with phrase conversion
  * - jp: Japanese Shinjitai
  * - t: OpenCC standard Traditional Chinese
  */
-export type LocaleCode = "cn" | "tw" | "twp" | "hk" | "jp" | "t";
+export type LocaleCode = "cn" | "tw" | "twp" | "hk" | "hkp" | "jp" | "t";
 
 /**
- * Dictionary file names for converting from variants to OpenCC standard
+ * Dictionary file names for converting from variants to OpenCC standard.
+ *
+ * Each array is ONE conversion step, merged into a single trie. Order is the
+ * REVERSE of OpenCC's `conversion_chain` order: OpenCC consults its dicts
+ * first-match-wins, our trie is last-write-wins, so the highest-priority dict
+ * (the phrase dicts) must be listed LAST. Chains mirror `tw2t` / `hk2t` /
+ * `tw2sp` / `hk2sp` in OpenCC's data/config.
  */
 export const variants2standard: Record<string, string[]> = {
   cn: ["STCharacters", "STPhrases"],
   hk: ["HKVariantsRev", "HKVariantsRevPhrases"],
+  hkp: ["HKVariantsRev", "HKVariantsRevPhrases", "HKPhrasesRev"],
   tw: ["TWVariantsRev", "TWVariantsRevPhrases"],
   twp: ["TWVariantsRev", "TWVariantsRevPhrases", "TWPhrasesRev"],
   jp: ["JPShinjitaiCharacters", "JPShinjitaiPhrases"],
 };
 
 /**
- * Dictionary file names for converting from OpenCC standard to variants
+ * Dictionary file names for converting from OpenCC standard to variants.
+ * Same ordering rule as above; chains mirror `t2tw` / `t2hk` / `s2twp` / `s2hkp`.
+ *
+ * The `*VariantsPhrases` dicts are what keep proper nouns from being
+ * over-converted (張棟樑 must not become 張棟梁, 純喫茶 not 純吃茶) — dropping
+ * them silently diverges from OpenCC on hundreds of entries.
  */
 export const standard2variants: Record<string, string[]> = {
   cn: ["TSCharacters", "TSPhrases"],
-  hk: ["HKVariants"],
-  tw: ["TWVariants"],
-  twp: ["TWVariants", "TWPhrases"],
+  hk: ["HKVariants", "HKVariantsPhrases"],
+  hkp: ["HKVariants", "HKVariantsPhrases", "HKPhrases"],
+  tw: ["TWVariants", "TWVariantsPhrases"],
+  twp: ["TWVariants", "TWVariantsPhrases", "TWPhrases"],
   jp: ["JPShinjitaiCharactersRev"],
 };
 

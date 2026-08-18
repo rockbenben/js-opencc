@@ -72,7 +72,7 @@ console.log(hk2cn("軟件")); // 软件
 ```
 
 ```html
-<!-- 仅繁体→简体（最小，~96KB）：只传 from，to 固定为 cn -->
+<!-- 仅繁体→简体（最小，~98KB）：只传 from，to 固定为 cn -->
 <script src="https://cdn.jsdelivr.net/npm/js-opencc/dist/umd/t2cn.min.js"></script>
 <script>
   console.log(OpenCC.Converter({ from: "tw" })("軟件")); // 软件
@@ -162,6 +162,7 @@ const convert = OpenCC.Converter({ from: "cn", to: "tw" }, dict);
 | `tw`  | 繁体中文（台湾）                                |
 | `twp` | 繁体中文（台湾）+ 词汇转换（如：软件 → 軟體）   |
 | `hk`  | 繁体中文（香港）                                |
+| `hkp` | 繁体中文（香港）+ 词汇转换（如：伍迪·艾伦 → 活地·亞倫） |
 | `jp`  | 日本新字体                                      |
 | `t`   | OpenCC 标准繁体                                 |
 
@@ -169,9 +170,9 @@ const convert = OpenCC.Converter({ from: "cn", to: "tw" }, dict);
 
 | 包            | 大小（minified） | 说明                       |
 | ------------- | ---------------- | -------------------------- |
-| `full.min.js` | ~1.1 MB          | 完整版，支持所有转换方向   |
-| `cn2t.min.js` | ~1.0 MB          | 仅简体 → 繁体              |
-| `t2cn.min.js` | ~96 KB           | 仅繁体 → 简体（绝大多数字典是简→繁向，反向数据小） |
+| `full.min.js` | ~1.14 MB         | 完整版，支持所有转换方向   |
+| `cn2t.min.js` | ~1.05 MB         | 仅简体 → 繁体              |
+| `t2cn.min.js` | ~98 KB           | 仅繁体 → 简体（绝大多数字典是简→繁向，反向数据小） |
 
 ## API 一览
 

@@ -11,15 +11,18 @@ import { standard2variants, phraseDictDirection } from "../presets.js";
 import STCharacters from "../dict/STCharacters.js";
 import STPhrases from "../dict/STPhrases.js";
 import TWVariants from "../dict/TWVariants.js";
+import TWVariantsPhrases from "../dict/TWVariantsPhrases.js";
 import TWPhrases from "../dict/TWPhrases.js";
 import HKVariants from "../dict/HKVariants.js";
+import HKVariantsPhrases from "../dict/HKVariantsPhrases.js";
+import HKPhrases from "../dict/HKPhrases.js";
 import JPShinjitaiCharactersRev from "../dict/JPShinjitaiCharactersRev.js";
 import CNTWPhrases from "../dict/CNTWPhrases.js";
 
 type DictGroup = DictLike[];
 
 // Available target locales for cn2t
-type TargetLocale = "t" | "tw" | "twp" | "hk" | "jp";
+type TargetLocale = "t" | "tw" | "twp" | "hk" | "hkp" | "jp";
 
 interface ConverterOptions {
   from?: "cn";
@@ -32,8 +35,11 @@ const dictMap: Record<string, string> = {
   STCharacters,
   STPhrases,
   TWVariants,
+  TWVariantsPhrases,
   TWPhrases,
   HKVariants,
+  HKVariantsPhrases,
+  HKPhrases,
   JPShinjitaiCharactersRev,
 };
 
