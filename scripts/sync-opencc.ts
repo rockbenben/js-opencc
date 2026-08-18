@@ -8,6 +8,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { fileURLToPath } from "url";
+import { variants2standard, standard2variants } from "../src/presets.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,6 +16,7 @@ const ROOT_DIR = path.resolve(__dirname, "..");
 
 // OpenCC dictionary source
 const OPENCC_BASE_URL = "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary";
+const OPENCC_CONFIG_URL = "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/config";
 
 // Dictionary files available in OpenCC official repo (based on API check)
 const OFFICIAL_DICT_FILES = [
@@ -37,11 +39,43 @@ const OFFICIAL_DICT_FILES = [
 ];
 
 /**
- * Upstream files we knowingly do NOT ship, so the discovery warning below stays
- * meaningful. `CJK_Compatibility_Ideographs` normalizes Unicode compatibility
+ * Upstream files we knowingly do NOT ship. Every upstream .txt must be in either
+ * this list or OFFICIAL_DICT_FILES — anything else aborts the sync so a human
+ * decides. `CJK_Compatibility_Ideographs` normalizes Unicode compatibility
  * ideographs and is not part of any OpenCC conversion_chain.
  */
 const IGNORED_DICT_FILES = ["CJK_Compatibility_Ideographs"];
+
+/**
+ * Which OpenCC config each preset entry mirrors, so a drifting conversion chain
+ * fails the sync instead of silently diverging.
+ *
+ * `step` indexes the config's `conversion_chain`: single-step configs (t2tw) use
+ * 0; two-step ones (s2twp = cn→standard, then standard→twp) use 1 for the half
+ * this preset owns. Missing here on purpose: the cn side (`STCharacters` /
+ * `TSCharacters` groups), because OpenCC's s2t/t2s chains include dicts it
+ * generates at build time (see UNAVAILABLE_UPSTREAM_DICTS) which we cannot
+ * mirror from data/dictionary at all.
+ */
+const CONFIG_CHAINS: Array<{ config: string; side: "from" | "to"; locale: string; step: number }> = [
+  { config: "t2tw", side: "to", locale: "tw", step: 0 },
+  { config: "t2hk", side: "to", locale: "hk", step: 0 },
+  { config: "s2twp", side: "to", locale: "twp", step: 1 },
+  { config: "s2hkp", side: "to", locale: "hkp", step: 1 },
+  { config: "t2jp", side: "to", locale: "jp", step: 0 },
+  { config: "tw2t", side: "from", locale: "tw", step: 0 },
+  { config: "hk2t", side: "from", locale: "hk", step: 0 },
+  { config: "tw2sp", side: "from", locale: "twp", step: 0 },
+  { config: "hk2sp", side: "from", locale: "hkp", step: 0 },
+  { config: "jp2t", side: "from", locale: "jp", step: 0 },
+];
+
+/**
+ * Dicts referenced by OpenCC configs that do NOT exist in data/dictionary —
+ * OpenCC generates them during its own build, so no amount of syncing .txt
+ * files can produce them. Excluded from the chain comparison.
+ */
+const UNAVAILABLE_UPSTREAM_DICTS = ["STPhrases_GeneratedFromRegionalPhrases", "TSCharactersExt"];
 
 // Reverse dictionaries to generate (not available in OpenCC, need to create from forward dicts)
 const REVERSE_DICT_MAPPINGS: Record<string, string> = {
@@ -74,6 +108,60 @@ async function listUpstreamDictFiles(): Promise<string[] | null> {
     console.warn(`  GitHub API discovery skipped: ${(e as Error).message}`);
     return null;
   }
+}
+
+/**
+ * Compare each preset chain against the OpenCC config it mirrors and throw on
+ * drift. File-level discovery cannot see this: upstream adding an EXISTING dict
+ * to a chain, or reordering one, leaves the file list untouched while our
+ * conversion output silently diverges (that is how TWVariantsPhrases sat unused
+ * for three months while `張棟樑` was being mangled into `張棟梁`).
+ *
+ * Returns false if upstream configs could not be fetched, so a network blip
+ * skips the check rather than failing the sync.
+ */
+async function verifyChainsAgainstUpstream(): Promise<boolean> {
+  const collectDicts = (node: unknown, acc: string[] = []): string[] => {
+    if (!node || typeof node !== "object") return acc;
+    if (Array.isArray(node)) {
+      node.forEach((n) => collectDicts(n, acc));
+      return acc;
+    }
+    const n = node as { file?: string; dict?: unknown; dicts?: unknown };
+    if (n.file) acc.push(n.file.replace(/\.(txt|ocd2)$/, ""));
+    if (n.dicts) collectDicts(n.dicts, acc);
+    if (n.dict) collectDicts(n.dict, acc);
+    return acc;
+  };
+
+  const drift: string[] = [];
+  for (const { config, side, locale, step } of CONFIG_CHAINS) {
+    let chain: unknown;
+    try {
+      const res = await fetch(`${OPENCC_CONFIG_URL}/${config}.json`);
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      chain = ((await res.json()) as { conversion_chain?: Array<{ dict?: unknown }> }).conversion_chain?.[step]?.dict;
+    } catch (e) {
+      console.warn(`  Chain check skipped: could not fetch ${config}.json (${(e as Error).message})`);
+      return false;
+    }
+    const upstream = collectDicts(chain).filter((d) => !UNAVAILABLE_UPSTREAM_DICTS.includes(d));
+    // presets list highest-priority LAST (trie is last-write-wins) while OpenCC
+    // lists it FIRST (first match wins) — compare against the reversed preset.
+    const ours = [...((side === "to" ? standard2variants : variants2standard)[locale] ?? [])].reverse();
+    if (JSON.stringify(ours) !== JSON.stringify(upstream)) {
+      drift.push(`  ${config}: upstream [${upstream.join(" + ")}]  vs  presets.${side === "to" ? "standard2variants" : "variants2standard"}.${locale} [${ours.join(" + ")}]`);
+    }
+  }
+
+  if (drift.length > 0) {
+    throw new Error(
+      `OpenCC conversion chains changed upstream — update src/presets.ts (remember: presets list the ` +
+        `highest-priority dict LAST, the reverse of OpenCC's order):\n${drift.join("\n")}`
+    );
+  }
+  console.log(`✓ All ${CONFIG_CHAINS.length} conversion chains match upstream config.`);
+  return true;
 }
 
 async function downloadFile(fileName: string): Promise<string> {
@@ -180,20 +268,30 @@ async function main() {
     const upstream = new Set(upstreamFiles);
     const added = upstreamFiles.filter((f) => !known.has(f));
     const removed = OFFICIAL_DICT_FILES.filter((f) => !upstream.has(f));
-    if (added.length > 0) {
-      console.warn(`⚠️  Upstream has new dict file(s) not in OFFICIAL_DICT_FILES: ${added.join(", ")}`);
-      console.warn(`   If these are needed, add to OFFICIAL_DICT_FILES in scripts/sync-opencc.ts.`);
+    // Abort rather than warn: a warning on an otherwise-green run is invisible.
+    // TWVariantsPhrases was announced this way for three months while every
+    // affected conversion shipped wrong. Adopting a dict changes conversion
+    // output, so it needs a human — the sync just has to stop and say so.
+    if (added.length > 0 || removed.length > 0) {
+      const lines: string[] = [];
+      if (added.length > 0) {
+        lines.push(`Upstream has dict file(s) we neither ship nor ignore: ${added.join(", ")}`);
+        lines.push(`  → add each to OFFICIAL_DICT_FILES (and wire into src/presets.ts) or to IGNORED_DICT_FILES with a reason.`);
+      }
+      if (removed.length > 0) {
+        lines.push(`OFFICIAL_DICT_FILES references file(s) no longer upstream: ${removed.join(", ")}`);
+        lines.push(`  → remove them from OFFICIAL_DICT_FILES and from any src/presets.ts chain.`);
+      }
+      throw new Error(lines.join("\n"));
     }
-    if (removed.length > 0) {
-      console.warn(`⚠️  OFFICIAL_DICT_FILES references file(s) not present upstream: ${removed.join(", ")}`);
-      console.warn(`   These will 404 during download. Update OFFICIAL_DICT_FILES.`);
-    }
-    if (added.length === 0 && removed.length === 0) {
-      console.log("✓ OFFICIAL_DICT_FILES is in sync with upstream.");
-    }
+    console.log("✓ OFFICIAL_DICT_FILES is in sync with upstream.");
   } else {
     console.log("Skipping file-list comparison (no API response).");
   }
+
+  // Chain composition is the signal file discovery cannot see.
+  console.log("Verifying conversion chains against upstream config...");
+  await verifyChainsAgainstUpstream();
   console.log("");
 
   const allEntries: Record<string, [string, string][]> = {};

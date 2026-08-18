@@ -61,7 +61,11 @@ CNTWPhrases 的方向规则收拢到一处，反转词典的冲突策略修正�
 ### 开发 / CI
 
 - `entriesToOptimized` 新增打包格式守卫：key 含空格或任一侧含 `|` 时同步脚本直接报错，不再静默产出错位词典。
-- 同步脚本新增 `IGNORED_DICT_FILES`（目前只有 `CJK_Compatibility_Ideographs`，不属于任何 OpenCC 转换链）。此前上游新增文件会与"故意不要的文件"混在一起报同一条警告，`OFFICIAL_DICT_FILES is in sync with upstream` 因此从未出现过，警告也就失去了意义。
+- **同步脚本现在会因上游漂移而中止,不再只警告。** 两道检查:
+  - **文件级**——上游任何 `.txt` 既不在 `OFFICIAL_DICT_FILES` 也不在新增的 `IGNORED_DICT_FILES`（目前只有 `CJK_Compatibility_Ideographs`，不属于任何转换链）里就报错。此前只 `console.warn`，而绿色构建上的警告没人看：`TWVariantsPhrases` 就这样被公示了三个月，期间每次相关转换都是错的。
+  - **链条级**——拉取上游 `data/config` 的 10 个配置，与 `presets.ts` 的链条逐条比对，不一致即报错并打印两侧内容。这是文件级检查看不到的信号：上游把一本**已存在**的词典加进某条链、或调整链内顺序时，文件列表毫无变化。（OpenCC 构建期生成的 `STPhrases_GeneratedFromRegionalPhrases` / `TSCharactersExt` 不在 `data/dictionary` 里，无法同步，已排除在比对之外。）
+
+  两道都在下载词典之前执行，失败即 `exit 1`，由 workflow 已有的逻辑自动开 issue；issue 正文写明了两种漂移各自该怎么处理。代价是上游新增一个无关文件也会挡住当次字典更新，直到有人往 `IGNORED_DICT_FILES` 加一行。
 - 新增 `test/bundles.test.ts`；回归测试覆盖多 token 值往返、反转恒等回退、bundle 未知 locale 抛错、bundle 不支持的方向抛错、原型链成员当 locale 传入被拒、单向 bundle 对其全部可接受 locale 都带齐字典、full bundle 字典完整性、CNTWPhrases 方向规则（含主入口与 bundle 一致性）、反转词典的冲突与分隔符处理。
 - 单向 bundle 的方向在编译期已确定（`cn2t` 只可能正向、`t2cn` 只可能反向），移除各自那条永不执行的分支——`cn2t` 因此不再引入 `reverseDictString`。
 - README / README_TW 的 CDN 示例此前把三个 bundle 的 `<script>` 并排列出后调用 `OpenCC.Converter({ from: "cn", to: "tw" })`：最后加载的 t2cn 覆盖全局 `OpenCC`，而 t2cn 根本不支持 `from: "cn"`——照抄此前会静默返回未转换的原文，现在会抛 `t2cn bundle only converts to 'cn', got 'tw'`。改为每个 bundle 各自独立示例并说明只能引入一个；同时补充 CNTWPhrases 的方向说明。
