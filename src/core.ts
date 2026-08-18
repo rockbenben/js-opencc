@@ -240,6 +240,31 @@ export function ProtectedConverter(
 }
 
 /**
+ * Reverse a packed dict string ("k1 v1|k2 v2") into `[value, key][]` entries.
+ * The value is everything after the FIRST space (values may contain spaces,
+ * e.g. 二维码 → "QR Code") — same rule as `Trie.loadDict`'s string form.
+ *
+ * Collision policy, identical to `reverseEntries` in scripts/sync-opencc.ts:
+ * when several keys share one value (U盘/优盘 → 隨身碟) the FIRST key wins,
+ * because dicts list the preferred term first and the trie is last-wins — so
+ * without this the trailing synonym takes over (隨身碟 → 优盘). An identity pair
+ * outranks that, leaving the term untouched rather than guessing a synonym.
+ *
+ * Entries with no separator are skipped, as `Trie.loadDict` does.
+ */
+export function reverseDictString(data: string): string[][] {
+  const reversed = new Map<string, string>();
+  for (const entry of data.split("|")) {
+    const sep = entry.indexOf(" ");
+    if (sep < 0) continue;
+    const key = entry.slice(0, sep);
+    const value = entry.slice(sep + 1);
+    if (!reversed.has(value) || key === value) reversed.set(value, key);
+  }
+  return [...reversed];
+}
+
+/**
  * Parse OpenCC-format dictionary text into `[key, value][]` — the shape
  * accepted by `protectedDict`, `CustomConverter`, and `ConverterFactory`.
  *

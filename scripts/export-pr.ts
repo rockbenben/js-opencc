@@ -6,6 +6,12 @@
  *   1. NEW entries — present in our custom dict, absent upstream → PR candidates
  *   2. CONFLICTS — present in both with different values → human review needed
  *
+ * Known asymmetry: our custom dict allows one value containing spaces
+ * (二维码 → "QR Code") while upstream reads a space as a candidate separator.
+ * If upstream ever takes such an entry it will still list as a CONFLICT
+ * (ours "QR Code" vs upstream "QR") — that difference is real, since OpenCC's
+ * format cannot express our value.
+ *
  * Usage: npx tsx scripts/export-pr.ts
  */
 
@@ -55,10 +61,16 @@ function parseCustomDict(content: string): DictEntry[] {
   for (const rawLine of content.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (line === "" || line.startsWith("#")) continue;
+    // Accept a whitespace run when there is no tab, same as sync-opencc's
+    // parseToEntries — otherwise an entry that ships in the dict is invisible here.
     const tabIdx = line.indexOf("\t");
-    if (tabIdx < 0) continue;
-    const key = line.slice(0, tabIdx).trim();
-    const value = line.slice(tabIdx + 1).trim().split(/\s+/)[0];
+    const m = tabIdx >= 0 ? [line.slice(0, tabIdx), line.slice(tabIdx + 1).split("\t")[0]] : line.match(/^(\S+)\s+(.+)$/)?.slice(1);
+    if (!m) continue;
+    const key = m[0].trim();
+    // Keep the WHOLE value: custom entries are single multi-token values
+    // (二维码 → "QR Code"), not upstream's space-separated candidate list.
+    // Truncating here would export a mangled entry and mis-detect conflicts.
+    const value = m[1].trim();
     if (key && value) entries.push({ key, value });
   }
   return entries;

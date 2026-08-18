@@ -5,8 +5,8 @@
 
 // Imports removed
 
-import { ConverterFactory, ProtectedConverter, DictGroup, DictLike, parseOpenCCDict } from "./core.js";
-import { variants2standard, standard2variants, LocaleCode } from "./presets.js";
+import { ConverterFactory, ProtectedConverter, DictGroup, DictLike, parseOpenCCDict, reverseDictString } from "./core.js";
+import { variants2standard, standard2variants, phraseDictDirection, LocaleCode, PhraseDictDirection } from "./presets.js";
 // Loader map only (a few hundred bytes) — the dict payloads behind each thunk
 // stay in their own lazily-imported chunks so bundlers fetch per-file on demand.
 import { dictLoaders } from "./dict/index.js";
@@ -22,7 +22,11 @@ export interface ConverterOptions {
   from: LocaleCode;
   /** Target locale code */
   to: LocaleCode;
-  /** Whether to load custom phrase dictionary (default: true for twp) */
+  /**
+   * Whether to consider the custom CNTWPhrases dict (default: on when either
+   * end is `twp`). `true` enables it only in the directions
+   * `phraseDictDirection` supports; `false` disables it everywhere.
+   */
   loadCustomPhrases?: boolean;
 }
 
@@ -98,6 +102,9 @@ export function getDictFiles(from: LocaleCode, to: LocaleCode): string[][] {
   return groups;
 }
 
+/** Memo for the auto-loaded package dict — see `createConverter` for why. */
+let packageProtectedDict: Promise<DictLike | undefined> | undefined;
+
 /**
  * Try to auto-load the bundled `data/custom/ProtectedDict.txt`. Returns undefined in
  * browsers/Deno, on any I/O error, or when the file parses to zero entries.
@@ -145,16 +152,22 @@ export async function createConverter(
         "CharFixes.txt is replaced by `protectedDict` (hard override) — see README migration section."
     );
   }
-  // Auto-load bundled data/custom/ProtectedDict.txt if no explicit dict provided
+  // Auto-load bundled data/custom/ProtectedDict.txt if no explicit dict provided.
+  // Memoized like innerConverterCache: the file ships with the package and never
+  // changes at runtime, and re-reading it dominates everything else in a batch
+  // (200 cached calls: 82ms re-reading vs 0.1ms with the read hoisted out).
   if (!protectedDict) {
-    protectedDict = await tryLoadPackageProtectedDict();
+    if (!packageProtectedDict) packageProtectedDict = tryLoadPackageProtectedDict();
+    protectedDict = await packageProtectedDict;
   }
 
-  const loadPhrases = options.loadCustomPhrases ?? (options.to === "twp" || options.from === "twp");
-  const key = `${options.from}|${options.to}|${loadPhrases}`;
+  // Key on the resolved phrase direction, not the raw option: two calls that
+  // differ only in an explicit flag matching the default share one converter.
+  const phraseDir = phraseDictDirection(options.from, options.to, options.loadCustomPhrases);
+  const key = `${options.from}|${options.to}|${phraseDir}`;
   let innerPromise = innerConverterCache.get(key);
   if (!innerPromise) {
-    innerPromise = buildInnerConverter(options.from, options.to, loadPhrases).catch((e) => {
+    innerPromise = buildInnerConverter(options.from, options.to, phraseDir).catch((e) => {
       // Evict failed builds (e.g. a dict chunk 404 after a redeploy) so a later
       // call can retry instead of replaying the cached rejection forever.
       innerConverterCache.delete(key);
@@ -169,13 +182,13 @@ export async function createConverter(
   return protectedDict && protectedDict.length ? ProtectedConverter(protectedDict, convert) : convert;
 }
 
-// Inner converters are pure functions of (from, to, loadPhrases) over static
+// Inner converters are pure functions of (from, to, phraseDir) over static
 // dict data — cache the BUILD PROMISE so concurrent calls (e.g. a batch
 // converting N files) share one trie build instead of racing N of them.
 // protectedDict varies per call and wraps outside the cache.
 const innerConverterCache = new Map<string, Promise<(input: string) => string>>();
 
-async function buildInnerConverter(from: LocaleCode, to: LocaleCode, loadPhrases: boolean): Promise<(input: string) => string> {
+async function buildInnerConverter(from: LocaleCode, to: LocaleCode, phraseDir: PhraseDictDirection): Promise<(input: string) => string> {
   // Dict module strings ("k1 v1|k2 v2") go straight into the trie —
   // Trie.loadDict parses that format natively.
   const loadDict = async (name: string): Promise<string | null> => {
@@ -199,21 +212,12 @@ async function buildInnerConverter(from: LocaleCode, to: LocaleCode, loadPhrases
     if (group.length) dictGroups.push(group);
   }
 
-  // (b) CNTWPhrases (ordinary vocabulary dict, stays in main chain)
-  if (loadPhrases) {
+  // (b) CNTWPhrases (ordinary vocabulary dict, stays in main chain). Loaded only
+  // when the direction rule says it applies, so other directions don't fetch it.
+  if (phraseDir) {
     const phrases = await loadDict("CNTWPhrases");
     if (phrases) {
-      if (from === "twp" && to === "cn") {
-        // Key/value swap needs parsed entries; value = everything after the
-        // first space (values may contain spaces, same rule as Trie.loadDict).
-        const reversed = phrases.split("|").map((entry) => {
-          const sep = entry.indexOf(" ");
-          return [entry.slice(sep + 1), entry.slice(0, sep)];
-        });
-        dictGroups.unshift([reversed]);
-      } else {
-        dictGroups.unshift([phrases]);
-      }
+      dictGroups.unshift([phraseDir === "reverse" ? reverseDictString(phrases) : phrases]);
     }
   }
 

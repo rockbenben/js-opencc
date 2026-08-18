@@ -172,6 +172,75 @@ describe("inner converter cache", () => {
   });
 });
 
+// Regression: the direction rule lived in four places and only excluded twp→cn
+// from the forward dict, so a twp SOURCE aimed at any traditional target loaded
+// the cn→tw dict and rewrote script-invariant terms by mainland meaning —
+// 土豆 is peanut in Taiwan, silently converted to 馬鈴薯.
+describe("CNTWPhrases direction rule", () => {
+  it("leaves Taiwan-side text alone when the target is not cn", async () => {
+    for (const to of ["t", "tw", "hk"] as const) {
+      const convert = await createConverter({ from: "twp", to }, []);
+      expect(convert("土豆"), `twp→${to}`).toBe("土豆");
+      expect(convert("芝士"), `twp→${to}`).toBe("芝士");
+    }
+    // tw→twp is Taiwan-side on both ends too, so nothing applies.
+    const tw2twp = await createConverter({ from: "tw", to: "twp" }, []);
+    expect(tw2twp("土豆")).toBe("土豆");
+  });
+
+  it("still converts into and out of Taiwan vocabulary", async () => {
+    const cn2twp = await createConverter({ from: "cn", to: "twp" }, []);
+    expect(cn2twp("土豆")).toBe("馬鈴薯");
+    const twp2cn = await createConverter({ from: "twp", to: "cn" }, []);
+    expect(twp2cn("馬鈴薯")).toBe("土豆");
+  });
+
+  // The main entry loaded the FORWARD dict for an explicit opt-in on tw→cn while
+  // the t2cn bundle reversed it, so the same options produced 芝士→起司 (Taiwanese
+  // vocabulary) in a to-cn conversion.
+  it("reverses for an explicit opt-in on tw→cn, like the t2cn bundle", async () => {
+    const convert = await createConverter({ from: "tw", to: "cn", loadCustomPhrases: true }, []);
+    expect(convert("計程車")).toBe("出租车");
+    expect(convert("起司")).toBe("芝士");
+  });
+});
+
+// Regression: sync-opencc parsed custom dicts with the OFFICIAL-dict rule
+// (first space-separated token wins), truncating multi-token values —
+// 二维码 → "QR" instead of "QR Code". The v1.3.2 Trie.loadDict fix solved the
+// same truncation downstream but left this upstream copy in the generator.
+describe("custom dict multi-token values", () => {
+  it("keeps the whole value through cn→twp", async () => {
+    const convert = await createConverter({ from: "cn", to: "twp" }, []);
+    expect(convert("扫二维码支付")).toBe("掃QR Code支付");
+  });
+
+  it("round-trips through the twp→cn reversal (key contains a space)", async () => {
+    const convert = await createConverter({ from: "twp", to: "cn" }, []);
+    expect(convert("QR Code")).toBe("二维码");
+  });
+});
+
+// Regression: reverseEntries was last-wins on key collisions, so HKVariants'
+// 才→才 + 纔→才 reversed into 才→纔 — and entriesToOptimized then dropped the
+// correct single-char identity pair, leaving ONLY the wrong mapping (人才→人纔,
+// 煙→菸, 核心→覈心, 梁先生→樑先生). Char-level reversal must fall back to
+// identity; the *RevPhrases dicts disambiguate in context.
+describe("reverse dict identity fallback", () => {
+  it("hk→t keeps ambiguous chars as identity", async () => {
+    const convert = await createConverter({ from: "hk", to: "t" }, []);
+    expect(convert("人才")).toBe("人才"); // not 人纔
+    expect(convert("核心")).toBe("核心"); // not 覈心
+    expect(convert("煙")).toBe("煙"); // not 菸
+  });
+
+  it("tw→t keeps identity while *RevPhrases still disambiguate", async () => {
+    const convert = await createConverter({ from: "tw", to: "t" }, []);
+    expect(convert("梁先生")).toBe("梁先生"); // not 樑先生
+    expect(convert("橋梁")).toBe("橋樑"); // phrase dict still wins in-context
+  });
+});
+
 describe("dictLoaders", () => {
   // Invariant: the generated loader map must cover every dict file the presets
   // can ask for (plus CNTWPhrases), and each loader must resolve to dict data.

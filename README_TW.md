@@ -52,19 +52,30 @@ console.log(hk2cn("軟件")); // 软件
 
 ### CDN（瀏覽器）
 
+三個 bundle 都註冊全域 `OpenCC`，**同一頁面只引入其中一個**；每個 bundle 只接受自己支援的方向，傳別的方向會直接拋錯。
+
 ```html
-<!-- 完整版 -->
+<!-- 完整版：任意方向 -->
 <script src="https://cdn.jsdelivr.net/npm/js-opencc/dist/umd/full.min.js"></script>
-
-<!-- 僅簡體→繁體 -->
-<script src="https://cdn.jsdelivr.net/npm/js-opencc/dist/umd/cn2t.min.js"></script>
-
-<!-- 僅繁體→簡體（最小，~68KB） -->
-<script src="https://cdn.jsdelivr.net/npm/js-opencc/dist/umd/t2cn.min.js"></script>
-
 <script>
   const converter = OpenCC.Converter({ from: "cn", to: "tw" });
   console.log(converter("软件")); // 軟件
+</script>
+```
+
+```html
+<!-- 僅簡體→繁體：只傳 to，from 固定為 cn -->
+<script src="https://cdn.jsdelivr.net/npm/js-opencc/dist/umd/cn2t.min.js"></script>
+<script>
+  console.log(OpenCC.Converter({ to: "tw" })("软件")); // 軟件
+</script>
+```
+
+```html
+<!-- 僅繁體→簡體（最小，~96KB）：只傳 from，to 固定為 cn -->
+<script src="https://cdn.jsdelivr.net/npm/js-opencc/dist/umd/t2cn.min.js"></script>
+<script>
+  console.log(OpenCC.Converter({ from: "tw" })("軟件")); // 软件
 </script>
 ```
 
@@ -77,7 +88,7 @@ console.log(hk2cn("軟件")); // 软件
 ```typescript
 const protectedDict = [
   ["自行車", "自行車"],      // 鎖定不變：t2s 時強制保持繁體
-  ["周杰倫", "周杰倫"],       // 自訂譯名：s2t 時按你的方式轉
+  ["周杰伦", "周杰倫"],       // 自訂譯名：s2t 時按你的方式轉（鍵須為簡體才會命中）
   ["公司術語", "Company Term"],
 ];
 
@@ -136,8 +147,12 @@ const convert = OpenCC.Converter({ from: "cn", to: "tw" }, dict);
 
 [`data/custom/CNTWPhrases.txt`](./data/custom/CNTWPhrases.txt) 在 OpenCC `s2twp` / `tw2sp` 配置之上補充大陸 ↔ 台灣慣用語差異（如「視頻」↔「影片」、「滑鼠」↔「鼠標」）—— OpenCC 官方僅做 TW 內部短語規範化。
 
-- **生效時機**：`from: "twp"` 或 `to: "twp"`
-- **停用**：傳 `loadCustomPhrases: false`
+- **預設開啟**：`from: "twp"` 或 `to: "twp"`
+- **手動開關**：`loadCustomPhrases: false` 關閉；`true` 在下列方向之外**不會**生效（例如 `cn → hk`：把台灣詞彙塞進香港輸出並非本意）
+- **套用方向**（開啟後仍要看方向，主入口與三個 UMD bundle 一致）：
+  - 目標是台灣詞彙（`to: "tw" / "twp"`）且來源不是 → 正向（大陸詞 → 台灣詞）。`hk → twp` 也走這條：「芝士 → 起司」「雪糕 → 冰淇淋」正是想要的港台詞彙轉換
+  - 來源是台灣詞彙（`from: "tw" / "twp"`）且 `to: "cn"` → 反向（台灣詞 → 大陸詞）
+  - 其餘方向不套用。台灣側互轉（如 `twp → tw`）若正向套用，「土豆」這類簡繁同形詞會被按大陸語義改寫成「馬鈴薯」（台灣語境下「土豆」是花生）；而反向詞典的值是簡體，套到繁體目標上會混入簡體字
 
 ## 地區代碼
 
@@ -155,17 +170,17 @@ const convert = OpenCC.Converter({ from: "cn", to: "tw" }, dict);
 | 套件          | 大小（minified） | 說明                       |
 | ------------- | ---------------- | -------------------------- |
 | `full.min.js` | ~1.1 MB          | 完整版，支援所有轉換方向   |
-| `cn2t.min.js` | ~1.1 MB          | 僅簡體 → 繁體              |
-| `t2cn.min.js` | ~68 KB           | 僅繁體 → 簡體（絕大多數字典是簡→繁向，反向資料小） |
+| `cn2t.min.js` | ~1.0 MB          | 僅簡體 → 繁體              |
+| `t2cn.min.js` | ~96 KB           | 僅繁體 → 簡體（絕大多數字典是簡→繁向，反向資料小） |
 
 ## API 一覽
 
-主入口（`import from "js-opencc"`）和 UMD bundle 都暴露這些：
+主入口（`import from "js-opencc"`）和 UMD bundle 的公開 API（兩者的差異見「用途」列）：
 
 | 名稱                      | 用途                                                          |
 | ------------------------- | ------------------------------------------------------------- |
 | `createConverter`         | 推薦入口，按 `{ from, to }` 動態建構轉換函數（ESM/Node only） |
-| `Converter`               | UMD bundle 同步版本，簽名與 `createConverter` 一致            |
+| `Converter`               | UMD bundle 同步版本；參數同 `createConverter`，但 `cn2t` / `t2cn` 只接受各自方向 |
 | `ProtectedConverter`      | 把硬保護字典套在任意 inner converter 外面                     |
 | `parseOpenCCDict`         | 解析 OpenCC 格式字典文字為 `[key, value][]`                   |
 | `CustomConverter`         | 單字典快速建構轉換函數（不含 OpenCC 內建字典）                |

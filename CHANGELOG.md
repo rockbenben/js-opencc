@@ -4,6 +4,64 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)：**major 跟随 OpenCC 上游大版本**（OpenCC 1.x → js-opencc 1.x），minor / patch 由本项目自行迭代。
 
+## [1.4.1] — 2026-08-18
+
+CNTWPhrases 的方向规则收拢到一处，反转词典的冲突策略修正，以及同步 / 导出脚本的一批解析修复。
+
+### ⚠️ 行为变化
+
+同样的输入，以下几种情况输出会变或改为抛错，升级前请对照：
+
+| 场景 | 此前 | 现在 |
+| --- | --- | --- |
+| `{ from: "twp", to: "t" }("土豆")` | `馬鈴薯` | `土豆`（台湾语境下是花生） |
+| `Cn2t({ to: "twp" })("幼儿园")` | `幼兒園` | `幼稚園`（与主入口一致） |
+| `{ from: "twp", to: "cn" }("隨身碟")` | `优盘` | `U盘`（取首选词） |
+| `{ from: "hk", to: "t" }("人才")` | `人纔` | `人才` |
+| `{ from: "cn", to: "twp" }("扫二维码")` | `掃QR` | `掃QR Code` |
+| `T2cn({ from: "twp", to: "tw" })` | 静默返回简体 | 抛 `t2cn bundle only converts to 'cn'` |
+| `Cn2t({ to: "xx" })` | 静默返回半转换文本 | 抛 `Unknown 'to' locale` |
+
+`loadCustomPhrases: true` 现在只在规则支持的方向生效（`cn → hk` 等方向不再套用台湾词汇）；`false` 的语义不变。
+
+### 新增
+
+- **UMD bundle（cn2t / t2cn / full）现在与 npm 主入口一样加载 CNTWPhrases**：twp 方向默认加载，`loadCustomPhrases: false` 可关。此前 bundle 完全不带这本词典，同样输入 `幼儿园`，主入口出 `幼稚園` 而 UMD 只做字符转换出 `幼兒園`。反转逻辑提取为 `core.ts` 的 `reverseDictString`，方向规则提取为 `presets.ts` 的 `phraseDictDirection`（converter 与三个 bundle 共用一份）。每个 bundle 体积 +0.9KB。
+
+### 修复 · 转换结果
+
+- **自定义词典多 token 值被截断。** `sync-opencc` 处理 `data/custom/` 时误用官方词典的解析规则（只取首个空格分隔候选），`二维码 → QR Code` 被截成 `二维码 → QR`（cn→twp 输出 `掃QR支付`）。v1.3.2 修过下游 `Trie.loadDict` 的同型截断，但生成器里的这份漏掉了。`parseToEntries` 的 `isCustom` 参数此前是死代码。
+- **反转词典键冲突时丢正确映射、留错误映射。** `reverseEntries` 对多键撞同值是后者覆盖前者（注释声称 "keep all"，trie 里不成立）：`HKVariants` 的 `才→才` 与 `纔→才` 反转后都成键 `才`，错误的 `才→纔` 胜出——而 `entriesToOptimized` 又把正确的单字恒等对滤掉，只剩错的。实际影响：hk→t `人才→人纔`、`煙→菸`、`核心→覈心`，tw→t `梁先生→樑先生`。现在键冲突时恒等对优先（字级反转回退恒等，歧义由 `*RevPhrases` 短语词典按上下文消解：`橋梁→橋樑` 不受影响）。目标为 cn 的方向被 TSCharacters 掩盖，未受影响。
+- **cn2t / t2cn bundle 对未知 locale 静默跳步。** `standard2variants[to] || []` 会返回只做了一半转换的文本。v1.3.2 的 loud-error 政策覆盖了 `full` bundle 与 `createConverter`，漏掉这两个手写 bundle；dictMap 缺字典（与 presets 漂移）同样改为抛错。locale 校验改用 `Array.isArray`、字典查表改用 `typeof === "string"`，原先的真值判断与 `in` 会让 `constructor` / `toString` 这类原型链成员绕过守卫、最终死在 `.map` 的 TypeError 上。
+- **cn2t / t2cn 静默忽略反方向参数。** 两个单向 bundle 只读自己那一侧的 locale：`t2cn` 丢掉 `to`、`cn2t` 丢掉 `from`，于是 `T2cn({ from: "twp", to: "tw" })("計程車")` 返回 `出租车`——调用方要的是繁体台湾输出，拿到的却是简体大陆用词；`Cn2t({ from: "tw", to: "tw" })` 则把 cn→tw 词典套在已是繁体的输入上（正是本次修掉的「土豆」那类问题）。两处现在都校验并抛错，指向 full bundle。反向调用（`Cn2t({ to: "cn" })` / `T2cn({ from: "cn" })`）此前抛的是 `Dictionary TSCharacters missing from cn2t bundle`，把「不支持该方向」说成了一个并不存在的打包问题，现在给出指向另一个 bundle 的明确提示。
+- **台湾侧文本被按大陆语义改写。** CNTWPhrases 的方向判断此前只把 `twp → cn` 排除在正向之外，于是 `from: "twp"` 配上任何繁体目标（`t` / `tw` / `hk` / `jp`）都会套用**正向**的 cn→tw 词典。词典里「土豆」「芝士」「高考」「雪糕」「薯片」等简繁同形词因此命中：`{ from: "twp", to: "t" }("土豆")` 输出 `馬鈴薯`——而台湾语境下「土豆」是花生。方向规则收拢为 `presets.ts` 的 `phraseDictDirection` 一处：仅「从台湾词汇之外进入 `tw`/`twp`」走正向、「从 `tw`/`twp` 出到 `cn`」走反向，其余方向不套用（反向词典的值是简体，套到繁体目标上会混入简体字）。
+- **`loadCustomPhrases: true` 在主入口与 bundle 方向相反。** 同样的 `{ from: "tw", to: "cn", loadCustomPhrases: true }`，t2cn bundle 走反向（`計程車 → 出租车`），而主入口与 full bundle 走正向，在一个转简体的方向上输出台湾用词（`芝士 → 起司`）。三处现在共用同一条方向规则。
+- **反转词典同义词冲突取到次选词。** `reverseDictString` 没有冲突策略，trie 后写覆盖先写，多个键指向同一个值时**最后**一个胜出：`U盘`/`优盘 → 隨身碟` 反转成 `隨身碟 → 优盘`、`卷心菜`/`包菜 → 高麗菜` 反转成 `高麗菜 → 包菜`，结果静默依赖词典文件行序。改为首个键胜出（词典把首选词写在前面）、恒等对优先，与 `sync-opencc` 的 `reverseEntries` policy 一致。同时补上缺失的分隔符守卫——无空格的条目此前会伪造出 `幼稚園 → 幼稚`（吞掉末字）而不是被跳过。
+- **`full` bundle 仍在静默丢弃缺失字典。** `.filter(Boolean)` 让 dictMap 与 presets 漂移时静默跳步，正是 v1.3.2 loud-error 政策要防的场景（cn2t / t2cn 已改为抛错）。四处防御性过滤全部删除。由于 `dict` 与 `allDictFiles` 都是静态的，完整性改由测试「full bundle carries every preset dict」保证，不占 bundle 体积；cn2t / t2cn 的字典缺失判断则从真值改为 `typeof === "string"`，合法的空字典（全为单字恒等对时 `entriesToOptimized` 返回 `""`）不再被误判为缺失。
+
+### 修复 · 同步与导出脚本
+
+以下只影响 `npm run sync:opencc` / `npm run export:pr`，不改变已发布包的转换结果。
+
+- **`export:pr` 导出被截断的多 token 值。** `parseCustomDict` 读的是与 `sync-opencc` 同一个 `data/custom/CNTWPhrases.txt`，却仍按官方词典规则 `.split(/\s+/)[0]` 截断，`二维码 → QR Code` 被导出成 `二维码 → QR`，上游 PR 内容与冲突检测都基于错数据。
+- **同步脚本处理自定义词典的失败被吞掉。** `data/custom/` 那段包在 try/catch 里，格式守卫抛出的错只打印一行 `✗` 就继续，`allDictNames` 不再包含 CNTWPhrases、`src/dict/CNTWPhrases.ts` 也不重写，脚本仍打印「✓ Sync complete!」并以 0 退出；主入口随后按缺失字典处理（只 `console.warn`）而三个 bundle 静态导入磁盘上的旧文件，npm 与 UMD 再次分叉。文件缺失此前也只是警告，但 bundle 现在静态依赖它（`tsc` 会报 TS2307）。两种情况都改为直接中止同步。
+- **缩进的注释行被当成词条。** 注释判断跑在未 trim 的原始行上，而新增的无 tab 回退是按 trim 后的行匹配的，于是 `  # ===== 交通 =====`（行首有空格）会解析成词条 `# → ===== 交通 =====`，打包守卫也拦不住（key `#` 既无空白也无 `|`），最终把用户文本里所有 `#` 都改写。现在先 trim 再判断注释，与 `parseOpenCCDict` 一致。
+- **官方词典的值可能吞掉制表符。** 解析改用 `slice(tabIdx + 1)` 后丢掉了原先 `split("\t")` 在第二个制表符处的隐含边界，上游若出现 `key\tv1\tv2`，值会变成含制表符的 `v1\tv2` 并被写进词典（格式守卫只检查 key 的空白与两侧的 `|`）。今日上游 12 个文件均无此形，属潜在问题；现在两种词典都在第二个制表符处截断。
+- **`export:pr` 与同步脚本对同一个文件解析规则不一致。** `parseCustomDict` 仍只认制表符，空格分隔的词条同步后能生效却不会出现在 PR 候选里；现在自定义侧同样支持空白串回退。（上游侧仍按 OpenCC 惯例只取首个候选：818 行里有 44 行是多候选，放宽成「命中任一候选即算已同步」会把真实分歧误判为已同步。）
+- **`sync-opencc` 静默丢弃空格分隔的自定义词条。** `parseToEntries` 只认 tab，而运行时的 `parseOpenCCDict` 支持空格串回退；贡献者往 `data/custom/` 里写 `酸奶 優格`（空格无 tab），同步照常打印条目数，那条却不会生效。现按首个空白串回退切分，与运行时解析器一致。
+
+### 性能
+
+- **`createConverter` 每次调用都重读 `data/custom/ProtectedDict.txt`。** 自动加载落在转换器缓存外面，批量按文件调用时每次都付一次 `fs.readFile` + `parseOpenCCDict`：200 次命中缓存的调用实测 82ms，把读盘提出去后只剩 0.1ms。改为与内层转换器同样的 promise memo（该文件随包发布，运行时不会变）。
+
+### 开发 / CI
+
+- `entriesToOptimized` 新增打包格式守卫：key 含空格或任一侧含 `|` 时同步脚本直接报错，不再静默产出错位词典。
+- 新增 `test/bundles.test.ts`；回归测试覆盖多 token 值往返、反转恒等回退、bundle 未知 locale 抛错、bundle 不支持的方向抛错、原型链成员当 locale 传入被拒、单向 bundle 对其全部可接受 locale 都带齐字典、full bundle 字典完整性、CNTWPhrases 方向规则（含主入口与 bundle 一致性）、反转词典的冲突与分隔符处理。
+- 单向 bundle 的方向在编译期已确定（`cn2t` 只可能正向、`t2cn` 只可能反向），移除各自那条永不执行的分支——`cn2t` 因此不再引入 `reverseDictString`。
+- README / README_TW 的 CDN 示例此前把三个 bundle 的 `<script>` 并排列出后调用 `OpenCC.Converter({ from: "cn", to: "tw" })`：最后加载的 t2cn 覆盖全局 `OpenCC`，而 t2cn 根本不支持 `from: "cn"`——照抄此前会静默返回未转换的原文，现在会抛 `t2cn bundle only converts to 'cn', got 'tw'`。改为每个 bundle 各自独立示例并说明只能引入一个；同时补充 CNTWPhrases 的方向说明。
+- 文档校对：Bundle 大小表按实际产物更新（`t2cn.min.js` ~68 KB → ~96 KB、`cn2t.min.js` ~1.1 MB → ~1.0 MB）；地区代码表里 `twp` 的示例「软件 → 软体」值被误写成简体，实际输出是 `軟體`；README_TW 的 `protectedDict` 自定义译名示例键被过度转换成繁体（`周杰倫`），永远命中不了简体输入，已改回 `周杰伦` 并注明键须为简体。
+
 ## [1.4.0] — 2026-08-18
 
 字典按需加载与转换器缓存，npm 包瘦身。

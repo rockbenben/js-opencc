@@ -93,27 +93,42 @@ function parseToEntries(content: string, isCustom: boolean = false): [string, st
   return content
     .trim()
     .split(/\r?\n/)
-    .map((line) => {
-      // Skip comments
-      if (line.startsWith("#") || !line.trim()) return null;
+    .map((rawLine) => {
+      // Trim BEFORE the comment test: the no-tab fallback below matches on a
+      // trimmed line, so an indented `  # 交通` would otherwise parse as the
+      // entry `# → 交通` and rewrite every `#` in converted text.
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#")) return null;
 
-      const [key, values] = line.split("\t");
+      // Tab is the normal separator, but some entries (and hand-edited custom
+      // ones) use spaces — accept a whitespace run too, matching the runtime
+      // parser in core.ts. Splitting on the FIRST run keeps multi-token values.
+      const tabIdx = line.indexOf("\t");
+      // A second tab ends the value field in both dict flavours — everything
+      // after it is a trailing comment/column, never part of the value.
+      const m = tabIdx >= 0 ? [line.slice(0, tabIdx), line.slice(tabIdx + 1).split("\t")[0]] : line.match(/^(\S+)\s+(.+)$/)?.slice(1);
+      if (!m) return null;
+      const [key, values] = m;
       if (!key || !values) return null;
 
-      let value = values;
-      if (!isCustom) {
-        // For official dicts, take first candidate (space separated)
-        value = values.split(" ")[0];
-      } else {
-        // For custom dicts, take the whole string (trim whitespace)
-        value = values.trim();
-      }
+      // Official dicts list space-separated candidates and the first wins;
+      // a custom entry is ONE value that may contain spaces (二维码 → "QR Code").
+      const value = isCustom ? values.trim() : values.trim().split(/\s+/)[0];
       return [key.trim(), value] as [string, string];
     })
     .filter((entry): entry is [string, string] => entry !== null && !!entry[0] && !!entry[1]);
 }
 
 function entriesToOptimized(entries: [string, string][]): string {
+  // Packed format: entries joined by "|", key/value split on FIRST space
+  // (Trie.loadDict string form). A "|" anywhere or a space in a KEY would
+  // silently corrupt every entry after it — fail the sync loudly instead.
+  // Values MAY contain spaces (custom dicts, e.g. 二维码 → "QR Code").
+  for (const [k, v] of entries) {
+    if (k.includes("|") || v.includes("|") || /\s/.test(k)) {
+      throw new Error(`Dict entry breaks packed format (space in key or "|"): ${JSON.stringify([k, v])}`);
+    }
+  }
   return entries
     .filter(([k, v]) => k !== v || k.length > 1) // Remove identity mappings for single chars
     .map(([k, v]) => `${k} ${v}`)
@@ -121,9 +136,20 @@ function entriesToOptimized(entries: [string, string][]): string {
 }
 
 function reverseEntries(entries: [string, string][]): [string, string][] {
-  // Create reverse mapping: value -> key
-  // For multiple keys mapping to same value, keep all
-  return entries.map(([k, v]) => [v, k] as [string, string]);
+  // Reverse mapping: value -> key. When several keys collapse onto one value
+  // (HKVariants has both 才→才 and 纔→才), the IDENTITY pair must win: the
+  // trie is last-wins, so keeping all entries shipped 才→纔, 煙→菸, 核→覈,
+  // 梁→樑 — and entriesToOptimized then dropped the correct single-char
+  // identity pair, leaving only the wrong mapping. Char-level reversal falls
+  // back to identity; the *RevPhrases dicts disambiguate in context (上梁→上樑).
+  // Non-identity collisions (none upstream today) keep the first entry.
+  const reversed = new Map<string, string>();
+  for (const [k, v] of entries) {
+    if (!reversed.has(v) || k === v) {
+      reversed.set(v, k);
+    }
+  }
+  return [...reversed.entries()];
 }
 
 async function main() {
@@ -224,23 +250,25 @@ async function main() {
   const customDataDir = path.join(ROOT_DIR, "data", "custom");
   const customDataFiles = ["CNTWPhrases"];
 
+  // Failures here abort the sync, same as official dicts. Custom dicts used to
+  // warn-and-continue, but the UMD bundles now import src/dict/CNTWPhrases.js
+  // statically: a skipped file leaves the bundles on stale data (or fails tsc)
+  // while the main entry silently ships without the phrase dict — the npm/UMD
+  // divergence this release exists to remove, hidden behind a "✓ Sync complete!".
   for (const name of customDataFiles) {
-    try {
-      const p = path.join(customDataDir, `${name}.txt`);
-      if (fs.existsSync(p)) {
-        const content = fs.readFileSync(p, "utf-8");
-        const entries = parseToEntries(content);
-        const optimized = entriesToOptimized(entries);
-        const dictPath = path.join(dictDir, `${name}.ts`);
-        fs.writeFileSync(dictPath, `export default ${JSON.stringify(optimized)};\n`, "utf-8");
-        allDictNames.push(name);
-        console.log(`    ✓ ${name} (${entries.length} entries)`);
-      } else {
-        console.log(`    ⚠ ${name} not found in data/custom/`);
-      }
-    } catch (e) {
-      console.error(`    ✗ ${name}: ${e}`);
+    const p = path.join(customDataDir, `${name}.txt`);
+    if (!fs.existsSync(p)) {
+      throw new Error(`Custom dict ${name}.txt missing from data/custom/ — the bundles import it directly.`);
     }
+    const content = fs.readFileSync(p, "utf-8");
+    // isCustom: keep the WHOLE value ("QR Code"), don't truncate to the
+    // first space-separated token like official multi-candidate dicts.
+    const entries = parseToEntries(content, true);
+    const optimized = entriesToOptimized(entries);
+    const dictPath = path.join(dictDir, `${name}.ts`);
+    fs.writeFileSync(dictPath, `export default ${JSON.stringify(optimized)};\n`, "utf-8");
+    allDictNames.push(name);
+    console.log(`    ✓ ${name} (${entries.length} entries)`);
   }
 
   // Lazy loader map — one dynamic import per dict file so bundlers code-split

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { Trie, CustomConverter, ConverterFactory, ProtectedConverter, parseOpenCCDict } from "../src/core.js";
+import { Trie, CustomConverter, ConverterFactory, ProtectedConverter, parseOpenCCDict, reverseDictString } from "../src/core.js";
 
 describe("Trie", () => {
   it("should add and convert single word", () => {
@@ -224,5 +224,31 @@ describe("parseOpenCCDict", () => {
     const inner = ConverterFactory([[["X", "Y"]]]);
     const convert = ProtectedConverter(dict, inner);
     expect(convert("你好 X")).toBe("HELLO Y");
+  });
+});
+
+describe("reverseDictString", () => {
+  it("keeps the whole value, which may contain spaces", () => {
+    expect(reverseDictString("二维码 QR Code")).toEqual([["QR Code", "二维码"]]);
+  });
+
+  // Regression: reversal had no collision policy, so the trie's last-wins rule
+  // handed the value to the LAST synonym — 隨身碟 reversed to 优盘 rather than
+  // the preferred term the dict lists first.
+  it("gives a shared value to the FIRST key", () => {
+    expect(reverseDictString("U盘 隨身碟|优盘 隨身碟")).toEqual([["隨身碟", "U盘"]]);
+  });
+
+  // Matches reverseEntries in sync-opencc: an identity pair beats an earlier
+  // synonym, so an ambiguous term is left alone rather than guessed at.
+  it("lets an identity pair override an earlier key", () => {
+    expect(reverseDictString("优盘 隨身碟|隨身碟 隨身碟")).toEqual([["隨身碟", "隨身碟"]]);
+  });
+
+  // Regression: a separator-less entry fabricated [entry, entry-minus-last-char]
+  // instead of being skipped, so 幼稚園 mapped to 幼稚.
+  it("skips entries with no separator instead of truncating them", () => {
+    expect(reverseDictString("幼稚園")).toEqual([]);
+    expect(reverseDictString("幼稚園|你好 您好")).toEqual([["您好", "你好"]]);
   });
 });

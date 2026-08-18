@@ -2,9 +2,9 @@
  * Full bundle - includes all locales and converters
  */
 
-import { Trie, ConverterFactory, CustomConverter, ProtectedConverter, parseOpenCCDict, DictLike } from "../core.js";
+import { Trie, ConverterFactory, CustomConverter, ProtectedConverter, parseOpenCCDict, reverseDictString, DictLike } from "../core.js";
 import { HTMLConverter, HTMLConverterOptions } from "../html-converter.js";
-import { variants2standard, standard2variants, LocaleCode } from "../presets.js";
+import { variants2standard, standard2variants, phraseDictDirection, LocaleCode } from "../presets.js";
 
 // Import all preset dictionaries eagerly — UMD bundles are single-file by
 // design, so they bypass the lazy dictLoaders map in dict/index.js.
@@ -23,6 +23,7 @@ import TWPhrasesRev from "../dict/TWPhrasesRev.js";
 import JPShinjitaiCharacters from "../dict/JPShinjitaiCharacters.js";
 import JPShinjitaiCharactersRev from "../dict/JPShinjitaiCharactersRev.js";
 import JPShinjitaiPhrases from "../dict/JPShinjitaiPhrases.js";
+import CNTWPhrases from "../dict/CNTWPhrases.js";
 
 const dict: Record<string, string> = {
   STCharacters,
@@ -42,11 +43,22 @@ const dict: Record<string, string> = {
   JPShinjitaiPhrases,
 };
 
+// Invariant: `dict` carries every name in allDictFiles, so the lookups below
+// index it directly. Do not add a `.filter(Boolean)` here — dropping an unknown
+// name silently returns partially-converted text. Both sides are static, so the
+// guard is the test "full bundle carries every preset dict", not shipped bytes.
+
 type DictGroup = DictLike[];
 
 interface ConverterOptions {
   from: LocaleCode;
   to: LocaleCode;
+  /**
+   * Whether to consider the custom CNTWPhrases dict (default: on when either
+   * end is `twp`). `true` enables it only in the directions
+   * `phraseDictDirection` supports; `false` disables it everywhere.
+   */
+  loadCustomPhrases?: boolean;
 }
 
 /**
@@ -64,10 +76,12 @@ interface ConverterOptions {
 function Converter(options: ConverterOptions, protectedDict?: DictLike): (input: string) => string {
   // Reject unknown locales loudly rather than silently skipping a step and
   // returning partially-converted text (JS callers bypass the TS type check).
-  if (options.from !== "t" && !variants2standard[options.from]) {
+  // Array.isArray, not truthiness: `variants2standard["constructor"]` is a
+  // truthy prototype member that would fall through to an opaque TypeError.
+  if (options.from !== "t" && !Array.isArray(variants2standard[options.from])) {
     throw new Error(`Unknown 'from' locale: ${options.from}`);
   }
-  if (options.to !== "t" && !standard2variants[options.to]) {
+  if (options.to !== "t" && !Array.isArray(standard2variants[options.to])) {
     throw new Error(`Unknown 'to' locale: ${options.to}`);
   }
 
@@ -75,20 +89,19 @@ function Converter(options: ConverterOptions, protectedDict?: DictLike): (input:
 
   // From variant to standard
   if (options.from !== "t") {
-    const dictFiles = variants2standard[options.from] || [];
-    const dicts = dictFiles.map((name) => (dict as Record<string, string>)[name]).filter(Boolean);
-    if (dicts.length) {
-      dictGroups.push(dicts);
-    }
+    dictGroups.push(variants2standard[options.from].map((name) => dict[name]));
   }
 
   // From standard to variant
   if (options.to !== "t") {
-    const dictFiles = standard2variants[options.to] || [];
-    const dicts = dictFiles.map((name) => (dict as Record<string, string>)[name]).filter(Boolean);
-    if (dicts.length) {
-      dictGroups.push(dicts);
-    }
+    dictGroups.push(standard2variants[options.to].map((name) => dict[name]));
+  }
+
+  // CNTWPhrases (custom vocabulary dict) — direction and default come from the
+  // shared rule, so UMD output matches the npm main entry.
+  const phraseDir = phraseDictDirection(options.from, options.to, options.loadCustomPhrases);
+  if (phraseDir) {
+    dictGroups.unshift([phraseDir === "reverse" ? reverseDictString(CNTWPhrases) : CNTWPhrases]);
   }
 
   let convert = ConverterFactory(...dictGroups);
@@ -100,8 +113,8 @@ function Converter(options: ConverterOptions, protectedDict?: DictLike): (input:
 
 // Locale data for ConverterBuilder compatibility
 const Locale = {
-  from: Object.fromEntries(Object.entries(variants2standard).map(([locale, files]) => [locale, files.map((name) => (dict as Record<string, string>)[name]).filter(Boolean)])),
-  to: Object.fromEntries(Object.entries(standard2variants).map(([locale, files]) => [locale, files.map((name) => (dict as Record<string, string>)[name]).filter(Boolean)])),
+  from: Object.fromEntries(Object.entries(variants2standard).map(([locale, files]) => [locale, files.map((name) => dict[name])])),
+  to: Object.fromEntries(Object.entries(standard2variants).map(([locale, files]) => [locale, files.map((name) => dict[name])])),
 };
 
 export { Converter, CustomConverter, ConverterFactory, ProtectedConverter, parseOpenCCDict, HTMLConverter, Locale, Trie };
