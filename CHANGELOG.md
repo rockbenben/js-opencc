@@ -69,7 +69,8 @@ CNTWPhrases 的方向规则收拢到一处，反转词典的冲突策略修正�
 - 新增 `test/bundles.test.ts`；回归测试覆盖多 token 值往返、反转恒等回退、bundle 未知 locale 抛错、bundle 不支持的方向抛错、原型链成员当 locale 传入被拒、单向 bundle 对其全部可接受 locale 都带齐字典、full bundle 字典完整性、CNTWPhrases 方向规则（含主入口与 bundle 一致性）、反转词典的冲突与分隔符处理。
 - 单向 bundle 的方向在编译期已确定（`cn2t` 只可能正向、`t2cn` 只可能反向），移除各自那条永不执行的分支——`cn2t` 因此不再引入 `reverseDictString`。
 - README / README_TW 的 CDN 示例此前把三个 bundle 的 `<script>` 并排列出后调用 `OpenCC.Converter({ from: "cn", to: "tw" })`：最后加载的 t2cn 覆盖全局 `OpenCC`，而 t2cn 根本不支持 `from: "cn"`——照抄此前会静默返回未转换的原文，现在会抛 `t2cn bundle only converts to 'cn', got 'tw'`。改为每个 bundle 各自独立示例并说明只能引入一个；同时补充 CNTWPhrases 的方向说明。
-- 文档校对：Bundle 大小表按实际产物更新（`t2cn.min.js` ~68 KB → ~96 KB、`cn2t.min.js` ~1.1 MB → ~1.0 MB）；地区代码表里 `twp` 的示例「软件 → 软体」值被误写成简体，实际输出是 `軟體`；README_TW 的 `protectedDict` 自定义译名示例键被过度转换成繁体（`周杰倫`），永远命中不了简体输入，已改回 `周杰伦` 并注明键须为简体。
+- **README 首屏对 `opencc-js` 的描述已过期。** 原文写「`opencc-js` 4 年未更新」——该项目 2026-04 已恢复维护，四个月内发布了 8 个版本（最新 1.4.1，2026-07-12）。改为陈述真实且不会过期的差异：`opencc-js` 的 `CustomConverter` 是独立转换器，无法在 OpenCC 内置字典之上锁定字段，而 `protectedDict` 用 PUA 占位符从机制上保证。官方 `opencc` 包依赖原生编译一句同时补上了具体依赖（`node-gyp` + `node-addon-api`）。
+- 文档校对：Bundle 大小表按实际产物更新（`t2cn.min.js` ~68 KB → ~98 KB、`cn2t.min.js` ~1.1 MB → ~1.05 MB）；地区代码表里 `twp` 的示例「软件 → 软体」值被误写成简体，实际输出是 `軟體`；README_TW 的 `protectedDict` 自定义译名示例键被过度转换成繁体（`周杰倫`），永远命中不了简体输入，已改回 `周杰伦` 并注明键须为简体。
 
 ## [1.4.0] — 2026-08-18
 

@@ -16,7 +16,7 @@
 - **`protectedDict` 硬保護字典** —— PUA 佔位符機制鎖定，不依賴資料巧合
 - **可一鍵匯出 PR 給 OpenCC 上游** —— 雙向貢獻
 
-> 為什麼不直接用現有方案？官方 `opencc` 包依賴 C++ 編譯（node-gyp 在純前端專案跑不起來）；`opencc-js` 4 年未更新。js-opencc 解決了這兩個問題。
+> 和現有方案的區別？官方 `opencc` 套件依賴原生編譯（`node-gyp` + `node-addon-api`，在純前端專案裡跑不起來）；`opencc-js` 是純 JS 但沒有硬保護機制——它的 `CustomConverter` 是一個獨立轉換器，無法在 OpenCC 內建字典**之上**鎖定欄位，只能靠鏈式呼叫碰運氣。js-opencc 的 `protectedDict` 用 PUA 佔位符從機制上保證這一點。
 
 ## 安裝
 
