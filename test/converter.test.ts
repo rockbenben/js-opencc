@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { createConverter, getDictFiles } from "../src/converter.js";
 import type { LocaleCode } from "../src/converter.js";
+import { dictLoaders } from "../src/dict/index.js";
+import { allDictFiles } from "../src/presets.js";
 
 describe("createConverter", () => {
   it("should convert cn to tw", async () => {
@@ -139,5 +141,48 @@ describe("getDictFiles", () => {
     expect(() => getDictFiles(bad, "t")).toThrow(/Unknown 'from' locale/);
     expect(() => getDictFiles("cn", bad)).toThrow(/Unknown 'to' locale/);
     await expect(createConverter({ from: bad, to: "t" }, [])).rejects.toThrow(/Unknown 'from' locale/);
+  });
+});
+
+describe("inner converter cache", () => {
+  // Inner converters are cached by (from, to, loadPhrases). Caching the BUILD
+  // PROMISE means concurrent calls (a batch converting N files) share ONE trie
+  // build — the identity check below fails if each call builds its own.
+  it("returns the identical converter for the same direction, incl. concurrent calls", async () => {
+    const [a, b] = await Promise.all([createConverter({ from: "t", to: "cn" }, []), createConverter({ from: "t", to: "cn" }, [])]);
+    expect(a).toBe(b);
+    const c = await createConverter({ from: "cn", to: "t" }, []);
+    expect(c).not.toBe(a);
+  });
+
+  it("wraps protection per call OUTSIDE the cache — the shared inner is never contaminated", async () => {
+    const plain = await createConverter({ from: "cn", to: "t" }, []);
+    const withProtection = await createConverter({ from: "cn", to: "t" }, [["头发", "头发"]]);
+    expect(withProtection).not.toBe(plain);
+    expect(withProtection("头发干燥")).toBe("头发乾燥");
+    // The cached inner must still convert normally after the protected call.
+    expect(plain("头发干燥")).toBe("頭髮乾燥");
+  });
+
+  // Pins the string-form CNTWPhrases key/value swap (twp→cn is the only
+  // direction that reverses a dict at load time).
+  it("reverses CNTWPhrases for twp→cn", async () => {
+    const convert = await createConverter({ from: "twp", to: "cn" }, []);
+    expect(convert("幼稚園")).toBe("幼儿园");
+  });
+});
+
+describe("dictLoaders", () => {
+  // Invariant: the generated loader map must cover every dict file the presets
+  // can ask for (plus CNTWPhrases), and each loader must resolve to dict data.
+  // Catches drift between sync-opencc's index generation and presets.ts.
+  it("covers every preset dict file plus CNTWPhrases", async () => {
+    for (const name of [...allDictFiles, "CNTWPhrases"]) {
+      const loader = dictLoaders[name];
+      if (!loader) throw new Error(`missing loader for ${name}`);
+      const data = (await loader()).default;
+      // "k1 v1|k2 v2" format — at least one space-separated entry
+      expect(data, `dict ${name} looks empty`).toMatch(/ /);
+    }
   });
 });

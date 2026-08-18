@@ -243,8 +243,15 @@ async function main() {
     }
   }
 
-  const indexContent = allDictNames.map((name) => `export { default as ${name} } from './${name}.js';`).join("\n");
-  fs.writeFileSync(path.join(dictDir, "index.ts"), indexContent + "\n", "utf-8");
+  // Lazy loader map — one dynamic import per dict file so bundlers code-split
+  // each dictionary into its own chunk and consumers fetch only what a
+  // conversion direction needs (STPhrases alone is ~1MB; t→cn needs ~40KB).
+  // Eager consumers (UMD bundles) import the dict files directly instead.
+  const indexContent =
+    "export const dictLoaders: Record<string, () => Promise<{ default: string }>> = {\n" +
+    allDictNames.map((name) => `  ${name}: () => import('./${name}.js'),`).join("\n") +
+    "\n};\n";
+  fs.writeFileSync(path.join(dictDir, "index.ts"), indexContent, "utf-8");
 
   // Write tracked manifest of upstream dict content hashes.
   // CI watches this file's git diff to decide whether to publish.

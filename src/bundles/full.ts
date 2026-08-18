@@ -6,8 +6,41 @@ import { Trie, ConverterFactory, CustomConverter, ProtectedConverter, parseOpenC
 import { HTMLConverter, HTMLConverterOptions } from "../html-converter.js";
 import { variants2standard, standard2variants, LocaleCode } from "../presets.js";
 
-// Import all dictionaries
-import * as dict from "../dict/index.js";
+// Import all preset dictionaries eagerly — UMD bundles are single-file by
+// design, so they bypass the lazy dictLoaders map in dict/index.js.
+import STCharacters from "../dict/STCharacters.js";
+import STPhrases from "../dict/STPhrases.js";
+import TSCharacters from "../dict/TSCharacters.js";
+import TSPhrases from "../dict/TSPhrases.js";
+import HKVariants from "../dict/HKVariants.js";
+import HKVariantsRev from "../dict/HKVariantsRev.js";
+import HKVariantsRevPhrases from "../dict/HKVariantsRevPhrases.js";
+import TWVariants from "../dict/TWVariants.js";
+import TWVariantsRev from "../dict/TWVariantsRev.js";
+import TWVariantsRevPhrases from "../dict/TWVariantsRevPhrases.js";
+import TWPhrases from "../dict/TWPhrases.js";
+import TWPhrasesRev from "../dict/TWPhrasesRev.js";
+import JPShinjitaiCharacters from "../dict/JPShinjitaiCharacters.js";
+import JPShinjitaiCharactersRev from "../dict/JPShinjitaiCharactersRev.js";
+import JPShinjitaiPhrases from "../dict/JPShinjitaiPhrases.js";
+
+const dict: Record<string, string> = {
+  STCharacters,
+  STPhrases,
+  TSCharacters,
+  TSPhrases,
+  HKVariants,
+  HKVariantsRev,
+  HKVariantsRevPhrases,
+  TWVariants,
+  TWVariantsRev,
+  TWVariantsRevPhrases,
+  TWPhrases,
+  TWPhrasesRev,
+  JPShinjitaiCharacters,
+  JPShinjitaiCharactersRev,
+  JPShinjitaiPhrases,
+};
 
 type DictGroup = DictLike[];
 

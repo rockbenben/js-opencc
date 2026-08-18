@@ -4,6 +4,21 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)：**major 跟随 OpenCC 上游大版本**（OpenCC 1.x → js-opencc 1.x），minor / patch 由本项目自行迭代。
 
+## [1.4.0] — 2026-08-18
+
+字典按需加载与转换器缓存，npm 包瘦身。
+
+### 新增
+
+- **字典按需加载。** `src/dict/index.ts` 从急切 re-export 改为 `dictLoaders` 懒加载 map（每个字典一个独立的动态 `import()`）。打包器（webpack / Turbopack 等）会把每个字典拆成独立 chunk，浏览器端只按当前转换方向拉取所需字典：**t→cn 从全量 ~1.1MB 降到 ~40KB**——STPhrases 一个文件就占 1MB，而它只有 cn→\* 方向用得到。UMD bundle 不受影响（改为逐文件静态导入，保持单文件）。
+  - 内部破坏性变更：`dict/index.js` 不再急切导出各字典字符串。该模块不在包的公共 `exports` 里，正常消费方无感。
+- **`createConverter` 内建转换器缓存。** 内层转换链（trie 构建，热建约 26ms）按 `(from, to, loadPhrases)` 缓存**构建 promise**——并发调用（如批量转换 N 个文件的 `Promise.all`）共享同一次构建，而不是 N 份 trie 并行重建、同时驻留内存。`protectedDict` 逐次在缓存外现包，互不污染；构建失败（如发版后旧会话拉字典 chunk 404）会被逐出缓存，后续调用可重试。
+  - 行为变化：传空保护（`[]` / `""`）现在直接返回缓存的内层转换函数——同方向多次调用返回**同一个**函数实例（此前每次都是新实例，且空数组也会套一层空的 ProtectedConverter）。
+
+### 变更
+
+- **npm 包瘦身 ~1.3MB。** `files` 从 `["dist", "data"]` 收窄为 `["dist", "data/custom"]`：`data/official/*.txt` 是 sync 脚本的输入原料，运行时无任何代码引用，不再随包发布；运行时会自动加载的 `data/custom/ProtectedDict.txt` 保留。
+
 ## [1.3.2] — 2026-06-08
 
 修复内置短语词典此前完全失效的问题、一批 `HTMLConverter` 与边界健壮性缺陷，并随上游 OpenCC 双周同步更新字典数据。含一处公共 API 破坏性变更（`getDictFiles` 返回类型）。
