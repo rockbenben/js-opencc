@@ -14,7 +14,7 @@ npm install js-opencc
 import { createConverter } from "js-opencc";
 
 const convert = await createConverter({ from: "cn", to: "twp" });
-convert("出租车司机用鼠标打开视频"); // 計程車司機用滑鼠打開影片
+convert("出租车司机用鼠标打开视频"); // 計程車司機用滑鼠開啟影片
 ```
 
 ## ✨ 特性
