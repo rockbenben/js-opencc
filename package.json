@@ -1,6 +1,6 @@
 {
   "name": "js-opencc",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Pure JavaScript implementation of OpenCC for Chinese conversion, with auto-sync from official OpenCC dictionaries",
   "type": "module",
   "main": "./dist/index.js",
@@ -14,6 +14,7 @@
     "node": ">=22.12"
   },
   "exports": {
+    "./package.json": "./package.json",
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
