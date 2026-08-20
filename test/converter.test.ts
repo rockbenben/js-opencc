@@ -124,12 +124,14 @@ describe("getDictFiles", () => {
   // which runs each file as its own trie sequentially and kills every phrase
   // dictionary (头发→頭發). The grouped shape makes the correct usage natural.
   it("groups each conversion step's files together (char + phrase in one group)", () => {
-    // cn→t: single step (variant→standard); STCharacters + STPhrases MUST share a group
-    expect(getDictFiles("cn", "t")).toEqual([["STCharacters", "STPhrases"]]);
+    // cn→t: single step (variant→standard); the three MUST share one group so
+    // trie longest-match lets phrase entries win over single chars. The
+    // generated dict pins regional terms (出租车→出租車) — see presets.ts
+    expect(getDictFiles("cn", "t")).toEqual([["STCharacters", "STPhrases_GeneratedFromRegionalPhrases", "STPhrases"]]);
     // cn→tw: two steps (cn→standard, standard→tw); TWVariantsPhrases rides in
     // the same group as TWVariants so proper nouns win the longest match
     expect(getDictFiles("cn", "tw")).toEqual([
-      ["STCharacters", "STPhrases"],
+      ["STCharacters", "STPhrases_GeneratedFromRegionalPhrases", "STPhrases"],
       ["TWVariants", "TWVariantsPhrases"],
     ]);
     // t→cn: single step (standard→cn)
@@ -295,5 +297,82 @@ describe("dictLoaders", () => {
       // "k1 v1|k2 v2" format — at least one space-separated entry
       expect(data, `dict ${name} looks empty`).toMatch(/ /);
     }
+  });
+});
+
+describe("CNTWPhrases 精简的两个陷阱", () => {
+  // 这一组守的不是某个词条，是**「哪些词条能删」的判据**。按「官方 s2twp 也能转」
+  // 删过 11 条，测试当场红 3 条——两类原因都在下面，各一条。
+  it("tw→cn 显式开启时官方给不出，不能因为 twp→cn 能转就删", async () => {
+    // variants2standard.tw 不含 TWPhrasesRev，twp 才含 —— 两个方向不对称
+    const tw = await createConverter({ from: "tw", to: "cn", loadCustomPhrases: true }, []);
+    const twp = await createConverter({ from: "twp", to: "cn", loadCustomPhrases: false }, []);
+    expect(twp("計程車"), "twp 侧官方链条本来就能转，孤立看会以为词条冗余").toBe("出租车");
+    expect(tw("計程車"), "tw 侧只有自定义词库能转").toBe("出租车");
+  });
+
+  it("撞值的词条互相影响：删一条会改掉另一条的反向结果", async () => {
+    // U盘 和 优盘 的值同为 隨身碟，reverseDictString 对撞值取首键。
+    // 删掉 U盘 那条，隨身碟 的反向结果就从 U盘 变成 优盘——受影响的是另一条词
+    const rev = await createConverter({ from: "twp", to: "cn" }, []);
+    expect(rev("隨身碟")).toBe("U盘");
+  });
+});
+
+describe("幂等与往返收敛", () => {
+  // 转换是投影不是双射：同方向再转一次不该继续变。不成立的话，
+  // 「转完再转」这类真实用法（用户重复点转换、流水线里过两道）会越转越歪。
+  const TEXT = "夜色渐深，出租车司机把软件更新到最新版本，顺手用鼠标点开了视频网站的首页。";
+
+  it("同方向重复转换不再变化", async () => {
+    for (const [from, to] of [["cn", "t"], ["t", "cn"], ["cn", "twp"], ["twp", "cn"]] as const) {
+      const convert = await createConverter({ from, to }, []);
+      const once = convert(TEXT);
+      expect(convert(once), `${from}→${to} 二次转换又变了`).toBe(once);
+    }
+  });
+
+  it("cn→t→cn→t 往返收敛", async () => {
+    const s2t = await createConverter({ from: "cn", to: "t" }, []);
+    const t2s = await createConverter({ from: "t", to: "cn" }, []);
+    const a = s2t(t2s(s2t(TEXT)));
+    expect(s2t(t2s(a))).toBe(a);
+  });
+});
+
+describe("README 功能声明对账（每条对应文档里一句具体承诺）", () => {
+  it("地区代码表的 7 个 locale 任意组合都能构造并转换（42 方向冒烟）", async () => {
+    // README 的地区代码表暗示任意 from→to 可用——从没全扫过。判据：能构造、
+    // 输出非空、且没有 PUA 占位符泄漏到结果里。
+    const LOCALES = ["cn", "tw", "twp", "hk", "hkp", "jp", "t"] as const;
+    for (const from of LOCALES) {
+      for (const to of LOCALES) {
+        if (from === to) continue;
+        const convert = await createConverter({ from, to, loadCustomPhrases: false }, []);
+        const out = convert("汉语头发发现");
+        expect(out.length, `${from}→${to} 空输出`).toBeGreaterThan(0);
+        expect(/[\uE000-\uF8FF]/.test(out), `${from}→${to} PUA 泄漏`).toBe(false);
+      }
+    }
+  });
+
+  it("protectedDict 同名 from 后写覆盖前写（README『匹配规则』）", async () => {
+    const convert = await createConverter({ from: "cn", to: "tw" }, [
+      ["软件", "第一次"],
+      ["软件", "第二次"],
+    ]);
+    expect(convert("软件")).toBe("第二次");
+  });
+
+  it("loadCustomPhrases: true 在应用方向之外不生效（README 举的 cn→hk 例）", async () => {
+    // 把台湾词汇塞进香港输出并非本意——开关开着也不套
+    const convert = await createConverter({ from: "cn", to: "hk", loadCustomPhrases: true }, []);
+    expect(convert("地铁")).toBe("地鐵"); // 不是捷運
+  });
+
+  it("hk→twp 走正向词汇转换（README『应用方向』的港→台例子）", async () => {
+    const convert = await createConverter({ from: "hk", to: "twp" });
+    expect(convert("芝士")).toBe("起司");
+    expect(convert("雪糕")).toBe("冰淇淋");
   });
 });

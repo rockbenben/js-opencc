@@ -25,7 +25,12 @@ export type LocaleCode = "cn" | "tw" | "twp" | "hk" | "hkp" | "jp" | "t";
  * `tw2sp` / `hk2sp` in OpenCC's data/config.
  */
 export const variants2standard: Record<string, string[]> = {
-  cn: ["STCharacters", "STPhrases"],
+  // The generated dict sits between: upstream's group is
+  // [STPhrases ∪ Generated] short-circuit STCharacters, so in last-write-wins
+  // order STPhrases stays highest. Its value is the point — 出租车 must become
+  // 出租車 as a pinned unit (char-wise conversion could pick wrong variants for
+  // ambiguous characters), and segmentation needs it as a boundary entry.
+  cn: ["STCharacters", "STPhrases_GeneratedFromRegionalPhrases", "STPhrases"],
   hk: ["HKVariantsRev", "HKVariantsRevPhrases"],
   hkp: ["HKVariantsRev", "HKVariantsRevPhrases", "HKPhrasesRev"],
   tw: ["TWVariantsRev", "TWVariantsRevPhrases"],
@@ -54,6 +59,58 @@ export const standard2variants: Record<string, string[]> = {
  * All dictionary file names
  */
 export const allDictFiles = [...new Set([...Object.values(variants2standard).flat(), ...Object.values(standard2variants).flat()])];
+
+/** Traditional variants that carry their own regional vocabulary tables. */
+const REGIONAL_VARIANTS: ReadonlySet<string> = new Set(["tw", "twp", "hk", "hkp"]);
+
+/**
+ * Which dictionary to cut the input on before running the conversion chain,
+ * or `[]` for "don't segment".
+ *
+ * Segmentation only earns its cost when the chain has a **second** step that
+ * could match across boundaries the first step set — see
+ * `ConverterFactoryWithSegmentation`. OpenCC therefore declares a
+ * `segmentation` on exactly eight configs (`s2tw`, `s2twp`, `s2hk`, `s2hkp`,
+ * `tw2s`, `tw2sp`, `hk2s`, `hk2sp`) and on none of the single-step ones
+ * (`s2t`, `t2tw`, `tw2t`, `t2s`, `t2hk`, `hk2t`, `jp2t`, `t2jp`). This
+ * function reproduces that set rather than inventing a broader rule:
+ *
+ * - **cn → tw/twp/hk/hkp** cuts on `STPhrases`.
+ * - **tw/twp/hk/hkp → cn** cuts on `TSPhrases`.
+ * - everything else, including anything touching `t` or `jp`, does not cut.
+ *
+ * The direction of the dictionary is the part worth remembering: it is the
+ * **raw input** being cut, so the keys must be in the input's script.
+ * `s2*` cuts on the simplified-keyed `STPhrases`; `*2s` cuts on the
+ * traditional-keyed `TSPhrases` — which lives in the chain's *second* step,
+ * not its first. Picking "the first step's phrase dict" looks tidier and is
+ * wrong for `tw2s`.
+ *
+ * `jp` is excluded deliberately: Shinjitai conversion has no phrase table
+ * keyed in the source script, and OpenCC declares no segmentation for it.
+ *
+ * ## The second segmentation dict: `STPhrases_GeneratedFromRegionalPhrases`
+ *
+ * OpenCC's `s2*` configs segment on **two** dictionaries — `STPhrases` plus a
+ * generated one that maps each regional term's simplified projection to its
+ * plain traditional form (`出租车 出租車`), keeping the term whole through
+ * segmentation so the regional table can replace it as a unit. Without it
+ * `出租车司机` under-applies to `出租車司機` where OpenCC gives `計程車司機`.
+ *
+ * We once thought its filter was unrecoverable (a naive derivation yielded 276
+ * extra entries) and documented it as a known gap. The actual rule was found
+ * by reading OpenCC's `generate_st_phrases_from_regional_phrases.py`: project
+ * the keys of HKPhrases + TWPhrases through t2s and **drop projections shorter
+ * than 3 code points** — short keys would split longer Simplified words before
+ * STPhrases could match them. That one filter reproduces all 508 upstream
+ * entries exactly. The sync script now generates the dict; see
+ * `generateRegionalStPhrases` comments there for the full recipe.
+ */
+export function segmentationDictsFor(from: LocaleCode, to: LocaleCode): string[] {
+  if (from === "cn" && REGIONAL_VARIANTS.has(to)) return ["STPhrases", "STPhrases_GeneratedFromRegionalPhrases"];
+  if (to === "cn" && REGIONAL_VARIANTS.has(from)) return ["TSPhrases"];
+  return [];
+}
 
 /**
  * How the custom CNTWPhrases dict should be applied to a conversion:

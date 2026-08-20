@@ -2,14 +2,15 @@
  * Full bundle - includes all locales and converters
  */
 
-import { Trie, ConverterFactory, CustomConverter, ProtectedConverter, parseOpenCCDict, reverseDictString, DictLike } from "../core.js";
+import { Trie, ConverterFactory, ConverterFactoryWithSegmentation, CustomConverter, ProtectedConverter, parseOpenCCDict, reverseDictString, DictLike, normalizeCompatibilityIdeographs } from "../core.js";
 import { HTMLConverter, HTMLConverterOptions } from "../html-converter.js";
-import { variants2standard, standard2variants, phraseDictDirection, LocaleCode } from "../presets.js";
+import { variants2standard, standard2variants, phraseDictDirection, segmentationDictsFor, LocaleCode } from "../presets.js";
 
 // Import all preset dictionaries eagerly — UMD bundles are single-file by
 // design, so they bypass the lazy dictLoaders map in dict/index.js.
 import STCharacters from "../dict/STCharacters.js";
 import STPhrases from "../dict/STPhrases.js";
+import STPhrases_GeneratedFromRegionalPhrases from "../dict/STPhrases_GeneratedFromRegionalPhrases.js";
 import TSCharacters from "../dict/TSCharacters.js";
 import TSPhrases from "../dict/TSPhrases.js";
 import HKVariants from "../dict/HKVariants.js";
@@ -32,6 +33,7 @@ import CNTWPhrases from "../dict/CNTWPhrases.js";
 const dict: Record<string, string> = {
   STCharacters,
   STPhrases,
+  STPhrases_GeneratedFromRegionalPhrases,
   TSCharacters,
   TSPhrases,
   HKVariants,
@@ -105,14 +107,28 @@ function Converter(options: ConverterOptions, protectedDict?: DictLike): (input:
     dictGroups.push(standard2variants[options.to].map((name) => dict[name]));
   }
 
-  // CNTWPhrases (custom vocabulary dict) — direction and default come from the
-  // shared rule, so UMD output matches the npm main entry.
+  // Cut the input before converting: without it the second step's regional
+  // vocabulary table matches across word boundaries the first step set, and
+  // 他优化了 comes out 他最佳化了 where OpenCC gives 他優化了. Only the
+  // cn <-> tw/hk directions segment; segmentationDictsFor decides which dict.
+  const segmentationFiles = segmentationDictsFor(options.from, options.to);
+  const segmentation = segmentationFiles.length ? segmentationFiles.map((name) => dict[name]) : null;
+
+  let convert = ConverterFactoryWithSegmentation(segmentation, ...dictGroups);
+
+  // CNTWPhrases as a masking override, not a first trie group — the group
+  // shape let segmentation cut its keys (人脸识别 → [人脸][识别], entry dead)
+  // and let later steps re-chew its output (调制解调器 → 數據機 → 資料機 via
+  // TWPhrases 數據→資料). Masking hides the span from the whole inner pipeline
+  // and restores the TARGET VALUE at the end; the user's protectedDict still
+  // wraps outermost, keeping its priority above this layer. Direction and
+  // default come from the shared rule (presets.phraseDictDirection);
+  // "reverse" flips the dict for Taiwanese→cn conversions.
   const phraseDir = phraseDictDirection(options.from, options.to, options.loadCustomPhrases);
   if (phraseDir) {
-    dictGroups.unshift([phraseDir === "reverse" ? reverseDictString(CNTWPhrases) : CNTWPhrases]);
+    convert = ProtectedConverter(phraseDir === "reverse" ? reverseDictString(CNTWPhrases) : CNTWPhrases, convert);
   }
 
-  let convert = ConverterFactory(...dictGroups);
   if (protectedDict) {
     convert = ProtectedConverter(protectedDict, convert);
   }
@@ -125,6 +141,17 @@ const Locale = {
   to: Object.fromEntries(Object.entries(standard2variants).map(([locale, files]) => [locale, files.map((name) => dict[name])])),
 };
 
-export { Converter, CustomConverter, ConverterFactory, ProtectedConverter, parseOpenCCDict, HTMLConverter, Locale, Trie };
+// // 带切段的工厂也导出：只给不带切段的那个，自己拼链的人会静默丢掉地区词边界处理
+export {
+  Converter,
+  CustomConverter,
+  ConverterFactory,
+  ConverterFactoryWithSegmentation,
+  ProtectedConverter,
+  normalizeCompatibilityIdeographs,
+  parseOpenCCDict,
+  HTMLConverter,
+  Locale, Trie,
+};
 
 export type { ConverterOptions, HTMLConverterOptions, LocaleCode, DictLike, DictGroup };

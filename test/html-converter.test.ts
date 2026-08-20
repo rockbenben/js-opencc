@@ -95,4 +95,49 @@ describe("HTMLConverter", () => {
     restore();
     expect(div.textContent).toBe("x"); // true original, not "x✓"
   });
+
+  // ── 可见文字属性 ───────────────────────────────────────────────
+  //
+  // 判据是**显示 vs 数据**，不是元素类型：可编辑 input 的 value 是用户自己的
+  // 文字，不能动；它的 placeholder 是界面文字，和 <img alt> 同类，必须跟着转。
+  // 漏掉的话，一个转成繁体的页面里每个空输入框仍显示简体提示语。
+
+  it("转换 placeholder / title / aria-label（都是用户读到的文字）", () => {
+    const root = setup('<div lang="zh-CN"><input placeholder="简体" title="简体" aria-label="简体"></div>');
+    makeConverter(root).convert();
+    const input = root.querySelector("input")!;
+    expect(input.getAttribute("placeholder")).toBe("繁體");
+    expect(input.getAttribute("title")).toBe("繁體");
+    expect(input.getAttribute("aria-label")).toBe("繁體");
+  });
+
+  it("可编辑 input 的 value 是用户数据，转 placeholder 也不能碰它", () => {
+    const root = setup('<div lang="zh-CN"><input type="text" value="简体" placeholder="简体"></div>');
+    makeConverter(root).convert();
+    const input = root.querySelector<HTMLInputElement>("input")!;
+    expect(input.value, "用户输入的内容不许动").toBe("简体");
+    expect(input.getAttribute("placeholder"), "提示语要跟着页面转").toBe("繁體");
+  });
+
+  it("同一个节点上多个槽位都能各自还原", () => {
+    // 原来 originalValues 是每节点一个字符串、restore 按 tagName 分派，
+    // 一个元素有两处被转就会把其中一处还原成另一处的原值
+    const root = setup('<div lang="zh-CN"><input type="submit" value="简体" placeholder="简体" title="简体"></div>');
+    const { convert, restore } = makeConverter(root);
+    convert();
+    const input = root.querySelector<HTMLInputElement>("input")!;
+    expect(input.value).toBe("繁體");
+    expect(input.getAttribute("placeholder")).toBe("繁體");
+    expect(input.getAttribute("title")).toBe("繁體");
+    restore();
+    expect(input.value).toBe("简体");
+    expect(input.getAttribute("placeholder")).toBe("简体");
+    expect(input.getAttribute("title")).toBe("简体");
+  });
+
+  it("lang 不匹配时这些属性也不转", () => {
+    const root = setup('<div lang="en"><input placeholder="简体"></div>');
+    makeConverter(root).convert();
+    expect(root.querySelector("input")!.getAttribute("placeholder")).toBe("简体");
+  });
 });

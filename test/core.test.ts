@@ -96,6 +96,50 @@ describe("ConverterFactory", () => {
 });
 
 describe("ProtectedConverter", () => {
+  it("规则里的 PUA 字符被静默剥掉，不抛错（U+E000..U+F8FF 是内部占位符段）", () => {
+    // 早先这里是抛 TypeError。改成剥离的理由：这些字符肉眼不可见，用户看到的规则
+    // 本来就是剥掉之后那个样子；而规则常常来自最终用户（粘贴 / 导入 / localStorage
+    // 里的历史数据），抛错等于把库的内部不变式变成每个调用方都要先洗一遍的负担。
+    // PUA 一律写 \uE000 转义，别写裸字符。
+    const inner = (x: string): string => x;
+    expect(ProtectedConverter([["软\uE000件", "軟體"]], inner)("软件")).toBe("軟體");
+    expect(ProtectedConverter([["软件", "軟\uF8FF體"]], inner)("软件")).toBe("軟體");
+    expect(ProtectedConverter("软\uE000件 軟體", inner)("软件")).toBe("軟體");
+  });
+
+  it("规则剥完变空的一侧，整条跳过而不是把空串塞进 trie", () => {
+    const inner = (x: string): string => x;
+    expect(ProtectedConverter([["\uE000", "某值"]], inner)("某值")).toBe("某值");
+    expect(ProtectedConverter([["某键", "\uE000\uE000"]], inner)("某键")).toBe("某键");
+  });
+
+  it("字符串形式的规则表：分隔、含空格的值、缺分隔符的条目都和 loadDict 一致", () => {
+    // 规则清洗把字符串形式拆成键值对再重建，这一步容易和 loadDict 的解析口径分叉：
+    // 值可以含空格（`二维码 QR Code`），没有分隔符的条目要整条跳过。
+    const inner = (x: string): string => x;
+    expect(ProtectedConverter("二维码 QR Code", inner)("二维码")).toBe("QR Code");
+    expect(ProtectedConverter("a b|c d", inner)("ac")).toBe("bd");
+    expect(ProtectedConverter("nosep", inner)("nosep")).toBe("nosep");
+    expect(ProtectedConverter("", inner)("x")).toBe("x");
+    expect(ProtectedConverter("k ", inner)("k")).toBe("k");
+  });
+
+  it("畸形的单元素条目按 loadDict 的一贯做法跳过，不崩", () => {
+    // 规则清洗要和 loadDict 一样宽容：[["a"]] 的 value 是 undefined，
+    // 早先一版在这里读 undefined.replace 崩出过一句和 PUA 毫无关系的报错。
+    const inner = (s: string): string => s;
+    const c = ProtectedConverter([["a"]] as unknown as string[][], inner);
+    expect(c("ab")).toBe("ab");
+  });
+
+  it("passes PUA characters in the INPUT through untouched (they are data, not placeholders)", () => {
+    // 拦的是规则里的 PUA；用户文本里的 PUA 是数据，掩码分配器会绕开它们。
+    // U+E000 恰好是分配器的第一个候选槽位——占用它，逼分配器让位。
+    const inner = ConverterFactory([[["B", "X"]]]);
+    const convert = ProtectedConverter([["A", "B"]], inner);
+    expect(convert("\uE000A\uE000")).toBe("\uE000B\uE000");
+  });
+
   it("should mask and restore, bypassing inner converter", () => {
     // Inner: B → X
     const inner = ConverterFactory([[["B", "X"]]]);
@@ -126,6 +170,21 @@ describe("ProtectedConverter", () => {
     //   layer2.restore               → "<P1>M Y"       (P2→M; P1 is outer's, kept)
     //   layer1.restore               → "ZM Y"
     expect(layer1("AB X")).toBe("ZM Y");
+  });
+
+  it("PUA 密集的用户数据穿过多层嵌套不受损（掩码主循环删掉透传分支后的守卫）", () => {
+    // maskWithTrie 原来在主循环里逐字符查 existingPUA 做透传，优化时删掉了，
+    // 论证是「构造期守卫保证规则里没有 PUA ⇒ 任何 trie 匹配都盖不到 PUA 字符」。
+    // 那条论证只在这里被压过：PUA 与规则字符交错、且套三层。
+    // existingPUA 表本身仍然要留着——它是槽位分配的避让依据。
+    const inner = ConverterFactory([[["X", "Y"]]]);
+    const l3 = ProtectedConverter([["C", "c3"]], inner);
+    const l2 = ProtectedConverter([["B", "b2"]], l3);
+    const l1 = ProtectedConverter([["A", "a1"]], l2);
+    const pua = "\uE000\uE100\uF8FF";
+    expect(l1(pua + "ABC")).toBe(pua + "a1b2c3");
+    expect(l1("A" + pua + "B" + pua + "C")).toBe("a1" + pua + "b2" + pua + "c3");
+    expect(l1("\uE000".repeat(200) + "X")).toBe("\uE000".repeat(200) + "Y");
   });
 
   it("should be a no-op when protectedDict is empty", () => {
@@ -250,5 +309,36 @@ describe("reverseDictString", () => {
   it("skips entries with no separator instead of truncating them", () => {
     expect(reverseDictString("幼稚園")).toEqual([]);
     expect(reverseDictString("幼稚園|你好 您好")).toEqual([["您好", "你好"]]);
+  });
+});
+
+describe("Trie 的子节点按需分配", () => {
+  it("叶子节点不持有 Map（一半节点是叶子，空 Map 不是免费的）", () => {
+    const trie = new Trie();
+    trie.loadDict("头发 頭髮|发现 發現");
+    // 走到 `发`（有子节点）和 `髮`（叶子）两类节点，直接看私有字段：
+    // 这条断言守的是内存形状，不是行为——行为由下面那条守
+    const root = trie as unknown as { map?: Map<number, unknown> };
+    expect(root.map, "根节点有子节点，必须有 Map").toBeDefined();
+    const leafOf = (node: { map?: Map<number, unknown> }): { map?: Map<number, unknown> } => {
+      let cur = node;
+      while (cur.map && cur.map.size > 0) cur = [...cur.map.values()][0] as typeof cur;
+      return cur;
+    };
+    expect(leafOf(root).map, "叶子节点不该分配 Map").toBeUndefined();
+  });
+
+  it("按需分配不改变任何匹配行为", () => {
+    const trie = new Trie();
+    trie.loadDict("头发 頭髮|发现 發現|头 X");
+    // 叶子、中间节点、最长匹配优先、不匹配回落，四条路径都走一遍
+    expect(trie.convert("头发")).toBe("頭髮");
+    expect(trie.convert("头")).toBe("X");
+    expect(trie.convert("发现")).toBe("發現");
+    expect(trie.convert("头发和发现")).toBe("頭髮和發現");
+    expect(trie.convert("无关")).toBe("无关");
+    expect(trie.findLongestMatch("头发", 0)).toEqual({ end: 2, value: "頭髮" });
+    expect(trie.findLongestMatch("无", 0).end).toBe(0);
+    expect(trie.segment("头发和发现")).toEqual(["头发", "和", "发现"]);
   });
 });

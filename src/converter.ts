@@ -5,8 +5,8 @@
 
 // Imports removed
 
-import { ConverterFactory, ProtectedConverter, DictGroup, DictLike, parseOpenCCDict, reverseDictString } from "./core.js";
-import { variants2standard, standard2variants, phraseDictDirection, LocaleCode, PhraseDictDirection } from "./presets.js";
+import { ConverterFactoryWithSegmentation, ProtectedConverter, DictGroup, DictLike, parseOpenCCDict, reverseDictString } from "./core.js";
+import { variants2standard, standard2variants, phraseDictDirection, segmentationDictsFor, LocaleCode, PhraseDictDirection } from "./presets.js";
 // Loader map only (a few hundred bytes) — the dict payloads behind each thunk
 // stay in their own lazily-imported chunks so bundlers fetch per-file on demand.
 import { dictLoaders } from "./dict/index.js";
@@ -36,6 +36,12 @@ export interface ConverterOptions {
 export interface LocalePreset {
   from: Record<string, DictGroup>;
   to: Record<string, DictGroup>;
+  /**
+   * Dictionaries available to cut the input on, keyed by dict file name (the
+   * names `segmentationDictsFor` returns, e.g. `STPhrases` / `TSPhrases`).
+   * Optional: a preset without it simply does not segment.
+   */
+  segmentation?: Record<string, DictLike>;
 }
 
 /**
@@ -57,7 +63,14 @@ export function ConverterBuilder(localePreset: LocalePreset) {
       dictGroups.push(localePreset.to[options.to]);
     }
 
-    return ConverterFactory(...dictGroups);
+    // Segmentation needs a dictionary keyed in the INPUT's script, which a
+    // caller-supplied preset may not carry. Cut only when the preset actually
+    // has it; a preset without it keeps the old, unsegmented behaviour rather
+    // than silently cutting on the wrong script.
+    const segmentationFiles = segmentationDictsFor(options.from, options.to);
+    const segmentation = segmentationFiles.map((name) => localePreset.segmentation?.[name]).filter((d): d is DictLike => d !== undefined);
+
+    return ConverterFactoryWithSegmentation(segmentation.length ? segmentation : null, ...dictGroups);
   };
 }
 
@@ -156,7 +169,13 @@ export async function createConverter(
   // Memoized like innerConverterCache: the file ships with the package and never
   // changes at runtime, and re-reading it dominates everything else in a batch
   // (200 cached calls: 82ms re-reading vs 0.1ms with the read hoisted out).
-  if (!protectedDict) {
+  //
+  // `=== undefined`, NOT a falsy check: the documented contract is "any explicit
+  // second argument (including []) bypasses auto-load", and "" is an explicit
+  // argument too (DictLike admits strings). A falsy check made "" auto-load while
+  // [] bypassed — invisible while the shipped file is all-commented (auto-load
+  // yields zero entries either way), diverging the moment a user edits the file.
+  if (protectedDict === undefined) {
     if (!packageProtectedDict) packageProtectedDict = tryLoadPackageProtectedDict();
     protectedDict = await packageProtectedDict;
   }
@@ -212,17 +231,41 @@ async function buildInnerConverter(from: LocaleCode, to: LocaleCode, phraseDir: 
     if (group.length) dictGroups.push(group);
   }
 
-  // (b) CNTWPhrases (ordinary vocabulary dict, stays in main chain). Loaded only
-  // when the direction rule says it applies, so other directions don't fetch it.
+  // (b) Segmentation dictionary. Cutting the input first keeps a later
+  // conversion step from matching across a word boundary an earlier step set —
+  // without it the regional vocabulary tables over-fire in context
+  // (他优化了 → 他最佳化了 where OpenCC gives 他優化了). Empty for single-step
+  // chains, which then take ConverterFactory's cheaper path.
+  const segmentationFiles = segmentationDictsFor(from, to);
+  const segmentation = segmentationFiles.length ? (await Promise.all(segmentationFiles.map(loadDict))).filter((d): d is string => d !== null) : [];
+
+  // (c) Build the inner converter chain
+  let convert = ConverterFactoryWithSegmentation(segmentation.length ? segmentation : null, ...dictGroups);
+
+  // CNTWPhrases used to be unshifted as an ordinary FIRST trie group. That
+  // shape had two failure modes, both found by probing every entry in context:
+  //
+  //   1. Its keys were not segmentation boundaries, so the cut could land
+  //      inside one (人脸识别 → [人脸][识别]) and the entry never matched.
+  //   2. Its OUTPUT was re-fed through the built-in steps, which re-converted
+  //      pieces of it: 调制解调器 → 數據機 → TWPhrases hits 數據→資料 → 資料機.
+  //      This one predates segmentation — it shipped wrong from the start.
+  //
+  // ProtectedConverter's masking already implements the semantics this dict
+  // actually wants — match key, hide the span behind a PUA placeholder so the
+  // whole inner pipeline (segmentation included) cannot see it, restore the
+  // TARGET VALUE afterwards. Vocabulary override means override: nothing
+  // downstream may re-chew the result. The user's own protectedDict still
+  // wraps outermost, so its priority stays above this layer (inner masking
+  // passes pre-existing PUA through untouched).
   if (phraseDir) {
     const phrases = await loadDict("CNTWPhrases");
     if (phrases) {
-      dictGroups.unshift([phraseDir === "reverse" ? reverseDictString(phrases) : phrases]);
+      convert = ProtectedConverter(phraseDir === "reverse" ? reverseDictString(phrases) : phrases, convert);
     }
   }
 
-  // (c) Build the inner converter chain
-  return ConverterFactory(...dictGroups);
+  return convert;
 }
 
 // Re-export types

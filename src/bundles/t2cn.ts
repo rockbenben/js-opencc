@@ -3,9 +3,9 @@
  * Smaller bundle size for one-way conversion
  */
 
-import { Trie, ConverterFactory, CustomConverter, ProtectedConverter, parseOpenCCDict, reverseDictString, DictLike } from "../core.js";
+import { Trie, ConverterFactory, ConverterFactoryWithSegmentation, CustomConverter, ProtectedConverter, parseOpenCCDict, reverseDictString, DictLike, normalizeCompatibilityIdeographs } from "../core.js";
 import { HTMLConverter, HTMLConverterOptions } from "../html-converter.js";
-import { variants2standard, phraseDictDirection } from "../presets.js";
+import { variants2standard, phraseDictDirection, segmentationDictsFor } from "../presets.js";
 
 // Import only the dictionaries needed for t/tw/twp/hk -> cn
 import TSCharacters from "../dict/TSCharacters.js";
@@ -88,20 +88,52 @@ function Converter(options: ConverterOptions, protectedDict?: DictLike): (input:
   // From standard to cn (always needed)
   dictGroups.push([TSCharacters, TSPhrases]);
 
-  // CNTWPhrases (custom vocabulary dict) — whether it applies comes from the
-  // shared rule, so UMD output matches the npm main entry (幼稚園→幼儿园). The
-  // direction can only be "reverse" here: `to` is always cn, never Taiwanese.
+  // Cut the input before converting: without it the second step's regional
+  // vocabulary table matches across word boundaries the first step set, and
+  // 他优化了 comes out 他最佳化了 where OpenCC gives 他優化了. Only the
+  // cn <-> tw/hk directions segment; segmentationDictsFor decides.
+  const segmentation = segmentationDictsFor(options.from ?? "t", "cn").length ? [TSPhrases] : null;
+
+  let convert = ConverterFactoryWithSegmentation(segmentation, ...dictGroups);
+
+  // CNTWPhrases used to be unshifted as an ordinary FIRST trie group. That
+  // shape had two failure modes, both found by probing every entry in context:
+  //
+  //   1. Its keys were not segmentation boundaries, so the cut could land
+  //      inside one (人脸识别 → [人脸][识别]) and the entry never matched.
+  //   2. Its OUTPUT was re-fed through the built-in steps, which re-converted
+  //      pieces of it: 调制解调器 → 數據機 → TWPhrases hits 數據→資料 → 資料機.
+  //      This one predates segmentation — it shipped wrong from the start.
+  //
+  // ProtectedConverter's masking already implements the semantics this dict
+  // actually wants — match key, hide the span behind a PUA placeholder so the
+  // whole inner pipeline (segmentation included) cannot see it, restore the
+  // TARGET VALUE afterwards. Vocabulary override means override: nothing
+  // downstream may re-chew the result. The user's own protectedDict still
+  // wraps outermost, so its priority stays above this layer (inner masking
+  // passes pre-existing PUA through untouched).
+  // Only the "reverse" direction can occur here (`to` is always cn): flip the dict.
   if (phraseDictDirection(options.from, "cn", options.loadCustomPhrases)) {
-    dictGroups.unshift([reverseDictString(CNTWPhrases)]);
+    convert = ProtectedConverter(reverseDictString(CNTWPhrases), convert);
   }
 
-  let convert = ConverterFactory(...dictGroups);
   if (protectedDict) {
     convert = ProtectedConverter(protectedDict, convert);
   }
   return convert;
 }
 
-export { Converter, CustomConverter, ConverterFactory, ProtectedConverter, parseOpenCCDict, HTMLConverter, Trie };
+// // 带切段的工厂也导出：只给不带切段的那个，自己拼链的人会静默丢掉地区词边界处理
+export {
+  Converter,
+  CustomConverter,
+  ConverterFactory,
+  ConverterFactoryWithSegmentation,
+  ProtectedConverter,
+  normalizeCompatibilityIdeographs,
+  parseOpenCCDict,
+  HTMLConverter,
+  Trie,
+};
 
 export type { ConverterOptions, HTMLConverterOptions, DictLike, DictGroup };
