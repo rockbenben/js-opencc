@@ -8,7 +8,8 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { fileURLToPath } from "url";
-import { variants2standard, standard2variants } from "../src/presets.js";
+import { variants2standard, standard2variants, segmentationDictsFor, type LocaleCode } from "../src/presets.js";
+import { Trie } from "../src/core.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,6 +18,7 @@ const ROOT_DIR = path.resolve(__dirname, "..");
 // OpenCC dictionary source
 const OPENCC_BASE_URL = "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/dictionary";
 const OPENCC_CONFIG_URL = "https://raw.githubusercontent.com/BYVoid/OpenCC/master/data/config";
+const OPENCC_TESTCASES_URL = "https://raw.githubusercontent.com/BYVoid/OpenCC/master/test/testcases/testcases.json";
 
 // Dictionary files available in OpenCC official repo (based on API check)
 const OFFICIAL_DICT_FILES = [
@@ -58,6 +60,7 @@ const IGNORED_DICT_FILES = ["CJK_Compatibility_Ideographs"];
  * mirror from data/dictionary at all.
  */
 const CONFIG_CHAINS: Array<{ config: string; side: "from" | "to"; locale: string; step: number }> = [
+  { config: "s2t", side: "from", locale: "cn", step: 0 },
   { config: "t2tw", side: "to", locale: "tw", step: 0 },
   { config: "t2hk", side: "to", locale: "hk", step: 0 },
   { config: "s2twp", side: "to", locale: "twp", step: 1 },
@@ -71,11 +74,40 @@ const CONFIG_CHAINS: Array<{ config: string; side: "from" | "to"; locale: string
 ];
 
 /**
- * Dicts referenced by OpenCC configs that do NOT exist in data/dictionary —
- * OpenCC generates them during its own build, so no amount of syncing .txt
- * files can produce them. Excluded from the chain comparison.
+ * Which OpenCC configs declare a `segmentation`, and what our
+ * `segmentationDictsFor` must return for the equivalent locale pair.
+ *
+ * The conversion-chain check above cannot see this field, so without a
+ * separate comparison an upstream change to WHICH dictionary a config cuts on
+ * would land silently — and cutting on the wrong-script dictionary produces
+ * subtly wrong regional vocabulary, the failure mode that is invisible in
+ * word-list tests. Upstream declares segmentation on exactly these eight.
  */
-const UNAVAILABLE_UPSTREAM_DICTS = ["STPhrases_GeneratedFromRegionalPhrases", "TSCharactersExt"];
+const CONFIG_SEGMENTATION: Array<{ config: string; from: LocaleCode; to: LocaleCode }> = [
+  { config: "s2tw", from: "cn", to: "tw" },
+  { config: "s2twp", from: "cn", to: "twp" },
+  { config: "s2hk", from: "cn", to: "hk" },
+  { config: "s2hkp", from: "cn", to: "hkp" },
+  { config: "tw2s", from: "tw", to: "cn" },
+  { config: "tw2sp", from: "twp", to: "cn" },
+  { config: "hk2s", from: "hk", to: "cn" },
+  { config: "hk2sp", from: "hkp", to: "cn" },
+];
+
+/** Configs that must NOT declare a segmentation — a new one appearing is drift too. */
+const CONFIG_NO_SEGMENTATION = ["s2t", "t2s", "t2tw", "tw2t", "t2hk", "hk2t", "t2jp", "jp2t"];
+
+/**
+ * Dicts referenced by OpenCC configs that do NOT exist in data/dictionary and
+ * that we cannot reproduce. Excluded from the chain comparison.
+ *
+ * `STPhrases_GeneratedFromRegionalPhrases` used to sit here — it IS
+ * build-time-generated upstream, but its recipe turned out to be fully
+ * reproducible (see generateRegionalStPhrases below), so we generate it too
+ * and the chain check now covers it. `TSCharactersExt` stays: it is the
+ * tofu-risk extraction, which depends on font-coverage data we don't ship.
+ */
+const UNAVAILABLE_UPSTREAM_DICTS = ["TSCharactersExt"];
 
 // Reverse dictionaries to generate (not available in OpenCC, need to create from forward dicts)
 const REVERSE_DICT_MAPPINGS: Record<string, string> = {
@@ -164,6 +196,69 @@ async function verifyChainsAgainstUpstream(): Promise<boolean> {
   return true;
 }
 
+/**
+ * Compare each config's `segmentation` field against `segmentationDictsFor`.
+ *
+ * Two directions of drift both abort:
+ *   - a config we segment stops declaring one (or changes its dict), and
+ *   - a config we do NOT segment starts declaring one.
+ *
+ * The second is the easy one to miss: nothing would fail, we would simply
+ * skip a cut upstream now performs, and regional vocabulary would start
+ * over-applying in context exactly as it did before segmentation existed.
+ */
+async function verifySegmentationAgainstUpstream(): Promise<boolean> {
+  const collect = (node: unknown, acc: string[] = []): string[] => {
+    if (!node || typeof node !== "object") return acc;
+    if (Array.isArray(node)) {
+      node.forEach((n) => collect(n, acc));
+      return acc;
+    }
+    const n = node as { file?: string; dict?: unknown; dicts?: unknown };
+    if (n.file) acc.push(n.file.replace(/\.(txt|ocd2)$/, ""));
+    if (n.dicts) collect(n.dicts, acc);
+    if (n.dict) collect(n.dict, acc);
+    return acc;
+  };
+
+  const fetchConfig = async (config: string): Promise<{ segmentation?: { dict?: unknown } } | null> => {
+    try {
+      const res = await fetch(`${OPENCC_CONFIG_URL}/${config}.json`);
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      return (await res.json()) as { segmentation?: { dict?: unknown } };
+    } catch (e) {
+      console.warn(`  Segmentation check skipped: could not fetch ${config}.json (${(e as Error).message})`);
+      return null;
+    }
+  };
+
+  const drift: string[] = [];
+
+  for (const { config, from, to } of CONFIG_SEGMENTATION) {
+    const cfg = await fetchConfig(config);
+    if (!cfg) return false;
+    const upstream = cfg.segmentation ? collect(cfg.segmentation.dict).sort() : [];
+    const ours = [...segmentationDictsFor(from, to)].sort();
+    if (JSON.stringify(ours) !== JSON.stringify(upstream)) {
+      drift.push(`  ${config}: upstream segments on [${upstream.join(" + ") || "(none)"}]  vs  segmentationDictsFor("${from}","${to}") = [${ours.join(" + ") || "(none)"}]`);
+    }
+  }
+
+  for (const config of CONFIG_NO_SEGMENTATION) {
+    const cfg = await fetchConfig(config);
+    if (!cfg) return false;
+    if (cfg.segmentation) {
+      drift.push(`  ${config}: upstream ADDED a segmentation [${collect(cfg.segmentation.dict).join(" + ")}] — we skip the cut for this pair`);
+    }
+  }
+
+  if (drift.length > 0) {
+    throw new Error(`OpenCC segmentation config changed upstream — update segmentationDictsFor in src/presets.ts:\n${drift.join("\n")}`);
+  }
+  console.log(`✓ All ${CONFIG_SEGMENTATION.length + CONFIG_NO_SEGMENTATION.length} segmentation declarations match upstream config.`);
+  return true;
+}
+
 async function downloadFile(fileName: string): Promise<string> {
   const url = `${OPENCC_BASE_URL}/${fileName}.txt`;
   console.log(`  Downloading ${fileName}...`);
@@ -234,6 +329,20 @@ function entriesToOptimized(entries: [string, string][]): string {
     .join("|");
 }
 
+/**
+ * 一个词典模块的源码。
+ *
+ * ⚠️ **类型必须显式写成 `string`。** 直接 `export default "…"` 的话 tsc 会把整本词典
+ * 推断成一个字符串**字面量类型**——`STPhrases.d.ts` 因此长到 1.9 MB，全部 `.d.ts`
+ * 合计 2.3 MB，比它们描述的运行时代码还大。那个类型对谁都没用（没人会去 narrow
+ * 一本词典），却要让每一个消费者的 tsc 去解析它。
+ *
+ * 四处写词典的地方都走这里，别再各写各的——上一版就是四份重复的字面量拼接。
+ */
+const dictModuleSource = (optimized: string): string =>
+  `const dict: string = ${JSON.stringify(optimized)};\nexport default dict;\n`;
+
+
 function reverseEntries(entries: [string, string][]): [string, string][] {
   // Reverse mapping: value -> key. When several keys collapse onto one value
   // (HKVariants has both 才→才 and 纔→才), the IDENTITY pair must win: the
@@ -242,6 +351,18 @@ function reverseEntries(entries: [string, string][]): [string, string][] {
   // identity pair, leaving only the wrong mapping. Char-level reversal falls
   // back to identity; the *RevPhrases dicts disambiguate in context (上梁→上樑).
   // Non-identity collisions (none upstream today) keep the first entry.
+  //
+  // Status audited after the multi-value expansion: on CURRENT upstream data
+  // the identity clause never fires — every collision group across
+  // HKVariants / TWVariants / JPShinjitaiCharacters happens to list the
+  // identity key first (it sorts lower by code point, e.g. 才 U+624D before
+  // 纔 U+7E94), so first-wins already picks it. That ordering is a
+  // coincidence of today's code points, not an upstream contract — a future
+  // collision group whose identity key sorts AFTER a variant would ship the
+  // wrong mapping without this clause. One `|| k === v` is cheap insurance;
+  // do not delete it for being "never hit". The end behavior is pinned by
+  // the 人才→人才 test either way, and the official OpenCC testcases now
+  // guard all reverse-generated chains (t2jp/jp2t/tw2t/hk2t) wholesale.
   const reversed = new Map<string, string>();
   for (const [k, v] of entries) {
     if (!reversed.has(v) || k === v) {
@@ -292,6 +413,8 @@ async function main() {
   // Chain composition is the signal file discovery cannot see.
   console.log("Verifying conversion chains against upstream config...");
   await verifyChainsAgainstUpstream();
+  console.log("Verifying segmentation declarations against upstream config...");
+  await verifySegmentationAgainstUpstream();
   console.log("");
 
   const allEntries: Record<string, [string, string][]> = {};
@@ -327,7 +450,7 @@ async function main() {
     // build (and silently halt the automated biweekly publish).
     const optimized = entriesToOptimized(entries);
     const dictPath = path.join(dictDir, `${fileName}.ts`);
-    fs.writeFileSync(dictPath, `export default ${JSON.stringify(optimized)};\n`, "utf-8");
+    fs.writeFileSync(dictPath, dictModuleSource(optimized), "utf-8");
 
     console.log(`    ✓ ${fileName} (${entries.length} entries)`);
   }
@@ -335,24 +458,114 @@ async function main() {
   // Generate reverse dictionaries
   console.log("\n2. Generating reverse dictionaries:");
   for (const [revName, srcName] of Object.entries(REVERSE_DICT_MAPPINGS)) {
-    const srcEntries = allEntries[srcName];
-    if (!srcEntries) {
+    const srcRaw = officialContents[srcName];
+    if (!srcRaw) {
       console.log(`    ⚠ ${revName}: Source ${srcName} not found`);
       continue;
     }
 
-    const entries = reverseEntries(srcEntries);
+    // Reverse dicts must be built from ALL candidate values, not just the
+    // first one that `parseToEntries` keeps for forward conversion —
+    // JPShinjitaiCharacters has `弁→辨 辯 瓣`, and truncating to 辨→弁 loses
+    // 辯→弁 and 瓣→弁, so t2jp turned 辯護士 into 辯護士 instead of 弁護士
+    // (caught by official testcase case_040). OpenCC's own reverse.py emits
+    // value→key for every value; this mirrors it. The identity-outranks-
+    // first-wins collision policy in `reverseEntries` applies unchanged.
+    const expanded: [string, string][] = [];
+    for (const line of srcRaw.split("\n")) {
+      const l = line.trim();
+      if (!l || l.startsWith("#")) continue;
+      const tab = l.indexOf("\t");
+      if (tab < 0) continue;
+      const key = l.slice(0, tab);
+      for (const v of l.slice(tab + 1).trim().split(" ").filter(Boolean)) {
+        expanded.push([key, v]);
+      }
+    }
+    const entries = reverseEntries(expanded);
 
     // Save reverse dict (JSON.stringify escapes any special chars — see above).
     const optimized = entriesToOptimized(entries);
     const dictPath = path.join(dictDir, `${revName}.ts`);
-    fs.writeFileSync(dictPath, `export default ${JSON.stringify(optimized)};\n`, "utf-8");
+    fs.writeFileSync(dictPath, dictModuleSource(optimized), "utf-8");
 
     console.log(`    ✓ ${revName} (${entries.length} entries, from ${srcName})`);
   }
 
+  // Generate STPhrases_GeneratedFromRegionalPhrases — the second segmentation
+  // dict of every s2* config, and a member of their first conversion group.
+  //
+  // This is OpenCC's own recipe, read from
+  // data/scripts/generate_st_phrases_from_regional_phrases.py (do not guess at
+  // it — a wrong filter over-applies regional vocabulary, the exact failure
+  // segmentation exists to prevent):
+  //
+  //   1. take the KEYS of HKPhrases then TWPhrases (that input order);
+  //   2. convert each key to Simplified via the t2s chain;
+  //   3. DROP results shorter than 3 code points — upstream's comment: short
+  //      regional keys would split longer Simplified words before STPhrases
+  //      gets a chance to match them (优化/函数/内存 are all 2 chars: excluded);
+  //   4. two different keys projecting to the same Simplified form is a hard
+  //      error, matching upstream's build failure;
+  //   5. entry = simplified projection → ORIGINAL traditional key. The value
+  //      matters: converting 出租车 char-wise could pick wrong variants for
+  //      ambiguous characters, the pinned key cannot.
+  //
+  // Upstream converts with tofu-risk dicts included (TSCharactersExt), which
+  // we don't have — verified irrelevant here: against the opencc-data copy this
+  // reproduces all 508 entries exactly, none missing, none extra, none
+  // differing (regional phrase keys contain no tofu-risk-only characters).
+  console.log("\n2.5 Generating STPhrases_GeneratedFromRegionalPhrases:");
+  const GENERATED_REGIONAL_ST = "STPhrases_GeneratedFromRegionalPhrases";
+  {
+    const t2sTrie = new Trie();
+    // Single merged trie; single-char TSCharacters cannot collide with
+    // multi-char TSPhrases keys, so load order between them is immaterial.
+    for (const src of ["TSCharacters", "TSPhrases"]) {
+      const entries = allEntries[src];
+      if (!entries) throw new Error(`${GENERATED_REGIONAL_ST}: source dict ${src} missing`);
+      for (const [k, v] of entries) t2sTrie.addWord(k, v);
+    }
+
+    const projections = new Map<string, string[]>();
+    for (const src of ["HKPhrases", "TWPhrases"]) {
+      const entries = allEntries[src];
+      if (!entries) throw new Error(`${GENERATED_REGIONAL_ST}: source dict ${src} missing`);
+      for (const [key] of entries) {
+        const simplified = t2sTrie.convert(key);
+        if ([...simplified].length < 3) continue; // upstream's length filter
+        const bucket = projections.get(simplified) ?? [];
+        bucket.push(key);
+        projections.set(simplified, bucket);
+      }
+    }
+
+    const conflicts = [...projections].filter(([, keys]) => new Set(keys).size > 1);
+    if (conflicts.length > 0) {
+      // Loud failure, same as upstream: silently picking one would ship an
+      // arbitrary regional term for that word.
+      throw new Error(
+        `${GENERATED_REGIONAL_ST}: conflicting simplified projections:\n` +
+          conflicts.map(([k, keys]) => `  ${k}: ${keys.join(" ")}`).join("\n")
+      );
+    }
+
+    const generated: [string, string][] = [...projections]
+      .map(([k, keys]) => [k, keys[0]] as [string, string])
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)); // upstream sorts by key
+
+    allEntries[GENERATED_REGIONAL_ST] = generated;
+    const optimized = entriesToOptimized(generated);
+    fs.writeFileSync(
+      path.join(dictDir, `${GENERATED_REGIONAL_ST}.ts`),
+      dictModuleSource(optimized),
+      "utf-8"
+    );
+    console.log(`    \u2713 ${GENERATED_REGIONAL_ST} (${generated.length} entries, from HKPhrases + TWPhrases keys via t2s)`);
+  }
+
   // Generate dict index file
-  const allDictNames = [...OFFICIAL_DICT_FILES, ...Object.keys(REVERSE_DICT_MAPPINGS)];
+  const allDictNames = [...OFFICIAL_DICT_FILES, ...Object.keys(REVERSE_DICT_MAPPINGS), GENERATED_REGIONAL_ST];
 
   // Process Custom Dictionaries
   console.log("\n3. Processing custom dictionaries:");
@@ -375,7 +588,7 @@ async function main() {
     const entries = parseToEntries(content, true);
     const optimized = entriesToOptimized(entries);
     const dictPath = path.join(dictDir, `${name}.ts`);
-    fs.writeFileSync(dictPath, `export default ${JSON.stringify(optimized)};\n`, "utf-8");
+    fs.writeFileSync(dictPath, dictModuleSource(optimized), "utf-8");
     allDictNames.push(name);
     console.log(`    ✓ ${name} (${entries.length} entries)`);
   }
@@ -389,6 +602,21 @@ async function main() {
     allDictNames.map((name) => `  ${name}: () => import('./${name}.js'),`).join("\n") +
     "\n};\n";
   fs.writeFileSync(path.join(dictDir, "index.ts"), indexContent, "utf-8");
+
+  // Refresh OpenCC's official testcases — the ground truth our parity test
+  // runs against. Committed under test/fixtures/ (data/official/ is
+  // gitignored) so a fresh clone can run tests offline; refreshed here so the
+  // fixture and the dictionaries always come from the same upstream snapshot —
+  // testing master dicts against release-vintage cases (or vice versa) turns
+  // real drift into noise and real bugs into "known divergence".
+  console.log("\n4. Refreshing OpenCC official testcases fixture:");
+  {
+    const res = await fetch(OPENCC_TESTCASES_URL);
+    if (!res.ok) throw new Error(`testcases.json download failed: ${res.status} ${res.statusText}`);
+    const text = await res.text();
+    fs.writeFileSync(path.join(ROOT_DIR, "test", "fixtures", "opencc-testcases.json"), text, "utf-8");
+    console.log("    ✓ test/fixtures/opencc-testcases.json");
+  }
 
   // Write tracked manifest of upstream dict content hashes.
   // CI watches this file's git diff to decide whether to publish.
