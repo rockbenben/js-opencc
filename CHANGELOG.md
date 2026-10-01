@@ -4,6 +4,36 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)：**major 跟随 OpenCC 上游大版本**（OpenCC 1.x → js-opencc 1.x），minor / patch 由本项目自行迭代。
 
+## [Unreleased]
+
+### 新增
+
+- **小篆对照**：`seal` 成为第 8 个地区代码，对齐上游新增的 `t2seal` / `seal2t` / `s2seal`
+  （OpenCC `ef9748b6`，Unicode 18.0 篆書區塊 U+3D000..U+3FC3F，词典来自 UCD `SealSources.txt`
+  的 `kSEAL_MCJK`）。上游把这三个 config 标为实验性、仅供探索性研究：输出需要支持该区块的字型，
+  否则是一片豆腐块。官方用例从 16 个 config 涨到 19 个，小篆 15 例全过。
+- UMD `full` bundle 带上这 4 本字典（`full.min.js` 从 ~1.13 MB 涨到 ~1.35 MB，gzip +128 KB）；
+  `cn2t` / `t2cn` 按设计不带，传 `seal` 得到的是「本 bundle 不含此 locale，请用 full」，
+  不是「缺字典」那种指控自己打包出 bug 的消息。
+- ES Module 主入口按方向加载，不用小篆的消费者一个字节都不多拿。
+
+### 行为变化
+
+| 场景 | 此前 | 现在 |
+| --- | --- | --- |
+| `t2jp` 遇到 鹽 / 鋪 / 莊 | 䀋 / 舖 / 庄（简体形混进日文输出，䀋 在多数字体是豆腐块） | 塩 / 舗 / 荘，与 OpenCC 一致 |
+
+成因：反查字典生成只做「首候选 + identity 优先」，不看上游的 `# @reverse-prefer:` 注释。
+生成器现在逐条对齐 `data/scripts/common.py` 的 `Dict.swap()`，五本 `*Rev` 与上游算法差分对拍为零分歧。
+
+### 破坏性（类型形状，不影响默认用法）
+
+- `variants2standard` / `standard2variants` 的值从 `string[]` 变成 `string[][]`：一侧现在是若干
+  **转换步骤**，每步仍是一个合并 trie。小篆两侧各两步，而两步并进一个 trie 不等价于顺序执行
+  （第二步读的是第一步写出来的字：年 →秊→小篆），官方 `t2seal` 用例能当场抓到这种合并。
+  直接读这两个导出自己拼链的人需要多改一层 `.map`；`createConverter` / `Converter({ from, to })`
+  用法不变。
+
 ## [1.4.2] — 2026-08-21
 
 ### 行为变化（三条，都是修正而非破坏）

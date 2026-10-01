@@ -16,7 +16,7 @@ js-opencc 的第一版写于 2026 年 1 月，当时 opencc-js 已经 1259 天�
 
 | 项目 | js-opencc | opencc-js 1.4.1 |
 | --- | --- | --- |
-| 官方 testcases | 553 / 556 | 505 / 556 |
+| 官方 testcases（2026-08-20 那次对拍） | 553 / 556 | 505 / 556 |
 | 转换引擎 | 行为一致（消融验证） | 行为一致 |
 | 词典 | 追 OpenCC `master` | `opencc-data` release 快照 |
 | 两边词典差异 | 2286 条 / 63127（3.62%） | |
@@ -49,7 +49,12 @@ const theirs = OpenCCJS.Converter({ from: "cn", to: "tw" });
 
 ## 转换正确性
 
-题目和标准答案都出自 OpenCC 自己（`test/fixtures/opencc-testcases.json`，16 个 config、556 条期望）。
+题目和标准答案都出自 OpenCC 自己（`test/fixtures/opencc-testcases.json`，随 `sync:opencc` 与词典同一次快照刷新）。
+
+下面的分数是 2026-08-20 那一次对拍，分母是当时的 556 条。2026-10-01 上游加入小篆对照后夹具涨到
+19 个 config / 583 条期望（新增 `t2seal` 8 / `seal2t` 6 / `s2seal` 1 共 15 例，本包已全部实现并通过，
+当前 580 / 583，差的仍是那三条 `TSCharactersExt`）；opencc-js 没有跟进这三个 config，也没有重跑对拍，
+所以那一列仍是当时的 505 / 556，不能与本包的新分数直接比大小。
 
 | 实现 | 通过 |
 | --- | --- |
