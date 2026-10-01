@@ -192,12 +192,13 @@ npm run build         # 完整建置（含 sync + tsc + rollup）
 npm run build:dist    # 跳過 sync，只跑 tsc + rollup
 ```
 
-`sync:opencc` 不只是下載，它同時做四道**會中止**的對帳——上游變了而我們沒跟上時，寧可讓同步失敗，也不要靜默產出錯誤結果：
+`sync:opencc` 不只是下載，它同時做五道**會中止**的對帳——上游變了而我們沒跟上時，寧可讓同步失敗，也不要靜默產出錯誤結果：
 
 1. **字典檔案清單** —— 上游新增或刪除 `.txt` 且不在白名單裡，報錯要人裁決
-2. **轉換鏈** —— 14 條鏈逐個比對上游 config 的 `conversion_chain`，按步比：一側佔幾步就比幾步（小篆兩側各兩步）
-3. **切分宣告** —— 19 個 config 的 `segmentation` 欄位**兩個方向都查**：我們切的上游不切了，以及上游新增了我們沒切的。後者尤其容易漏——什麼都不會報錯，只是從此少切一刀，地區詞彙又開始越界替換
-4. **官方 testcases** —— fixture 與字典同一次快照重新整理，避免拿新字典去對舊用例
+2. **config 覆蓋面** —— 上游 `data/config` 裡每個 config 都必須落在「鏈比對名單」或「寫明理由的豁免名單」上，切段那兩份名單同樣要蓋全。這條單獨存在是因為下面兩道只按名單點名的 config 去取檔案：**名單少一條，執行照樣綠**，只是那條鏈從此沒人看（收養小篆時實測過——從名單刪掉 `s2seal`，套件毫無反應）。`test/upstream-contracts.test.ts` 離線盯同一件事，不連線也紅得下來
+3. **轉換鏈** —— 14 條鏈逐個比對上游 config 的 `conversion_chain`，按步比：一側佔幾步就比幾步（小篆兩側各兩步）
+4. **切段宣告** —— 19 個 config 的 `segmentation` 欄位**兩個方向都查**：我們切的上游不切了，以及上游新增了我們沒切的。後者尤其容易漏——什麼都不會報錯，只是從此少切一刀，地區詞彙又開始越界替換
+5. **官方 testcases** —— fixture 與字典同一次快照重新整理，避免拿新字典去對舊用例
 
 `STPhrases_GeneratedFromRegionalPhrases`（OpenCC 建置期產生的切分字典）由同步腳本按上游 `generate_st_phrases_from_regional_phrases.py` 的規則本地產生，不需要 OpenCC 的建置環境。
 

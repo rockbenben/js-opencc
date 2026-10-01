@@ -8,9 +8,10 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { fileURLToPath } from "url";
-import { variants2standard, standard2variants, segmentationDictsFor, type LocaleCode } from "../src/presets.js";
+import { variants2standard, standard2variants, segmentationDictsFor } from "../src/presets.js";
 import { Trie } from "../src/core.js";
 import { expandDictForReverse, parseReversePreferences, reverseEntries } from "./lib/reverse-dict.js";
+import { CONFIG_CHAINS, CONFIG_NO_SEGMENTATION, CONFIG_SEGMENTATION, NOT_CHAIN_CHECKED } from "./lib/upstream-contracts.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -54,66 +55,9 @@ const OFFICIAL_DICT_FILES = [
 const IGNORED_DICT_FILES = ["CJK_Compatibility_Ideographs"];
 
 /**
- * Which OpenCC config each preset entry mirrors, so a drifting conversion chain
- * fails the sync instead of silently diverging.
- *
- * `step` is the index where THIS side's step list starts in the config's
- * `conversion_chain`; the side may span several entries (the seal chains are two
- * steps each) and every one is compared in order. Single-step configs (t2tw) use
- * 0; two-step ones (s2twp = cn→standard, then standard→twp) use 1 for the half
- * this preset owns. Missing here on purpose: the cn side (`STCharacters` /
- * `TSCharacters` groups), because OpenCC's s2t/t2s chains include dicts it
- * generates at build time (see UNAVAILABLE_UPSTREAM_DICTS) which we cannot
- * mirror from data/dictionary at all.
+ * 契约名单（收哪些字典 / 比对哪些 config 的链 / 哪些 config 声明切段）都在
+ * scripts/lib/upstream-contracts.ts ——那里同时是被测试钉住的判据，本文件只负责执行。
  */
-const CONFIG_CHAINS: Array<{ config: string; side: "from" | "to"; locale: string; step: number }> = [
-  { config: "s2t", side: "from", locale: "cn", step: 0 },
-  { config: "t2tw", side: "to", locale: "tw", step: 0 },
-  { config: "t2hk", side: "to", locale: "hk", step: 0 },
-  { config: "s2twp", side: "to", locale: "twp", step: 1 },
-  { config: "s2hkp", side: "to", locale: "hkp", step: 1 },
-  { config: "t2jp", side: "to", locale: "jp", step: 0 },
-  { config: "tw2t", side: "from", locale: "tw", step: 0 },
-  { config: "hk2t", side: "from", locale: "hk", step: 0 },
-  { config: "tw2sp", side: "from", locale: "twp", step: 0 },
-  { config: "hk2sp", side: "from", locale: "hkp", step: 0 },
-  { config: "jp2t", side: "from", locale: "jp", step: 0 },
-  // 小篆两侧各占两步，所以 s2seal 的 to 侧从 1 开始、比两步。
-  { config: "t2seal", side: "to", locale: "seal", step: 0 },
-  { config: "seal2t", side: "from", locale: "seal", step: 0 },
-  { config: "s2seal", side: "to", locale: "seal", step: 1 },
-];
-
-/**
- * Which OpenCC configs declare a `segmentation`, and what our
- * `segmentationDictsFor` must return for the equivalent locale pair.
- *
- * The conversion-chain check above cannot see this field, so without a
- * separate comparison an upstream change to WHICH dictionary a config cuts on
- * would land silently — and cutting on the wrong-script dictionary produces
- * subtly wrong regional vocabulary, the failure mode that is invisible in
- * word-list tests. Upstream declares segmentation on exactly these eight.
- */
-const CONFIG_SEGMENTATION: Array<{ config: string; from: LocaleCode; to: LocaleCode }> = [
-  { config: "s2tw", from: "cn", to: "tw" },
-  { config: "s2twp", from: "cn", to: "twp" },
-  { config: "s2hk", from: "cn", to: "hk" },
-  { config: "s2hkp", from: "cn", to: "hkp" },
-  { config: "tw2s", from: "tw", to: "cn" },
-  { config: "tw2sp", from: "twp", to: "cn" },
-  { config: "hk2s", from: "hk", to: "cn" },
-  { config: "hk2sp", from: "hkp", to: "cn" },
-];
-
-/**
- * Configs that must NOT declare a segmentation — a new one appearing is drift too.
- *
- * 小篆那三个是多步链却不切段，值得记住为什么：它的后续步骤只映射单字（`SealVariants`
- * 与 `SealCharactersRev` 的键都恰好一个码位），没有会在跨词边界上乱咬的词组表，少一刀
- * 不多、多一刀不少。所以「链有第二步就该切段」这条经验不能反过来用——上面那个理由讲的
- * 是切段何时**必要**，不是它何时**够用**。
- */
-const CONFIG_NO_SEGMENTATION = ["s2t", "t2s", "t2tw", "tw2t", "t2hk", "hk2t", "t2jp", "jp2t", "t2seal", "seal2t", "s2seal"];
 
 /**
  * Dicts referenced by OpenCC configs that do NOT exist in data/dictionary and
@@ -223,6 +167,79 @@ async function verifyChainsAgainstUpstream(): Promise<boolean> {
     );
   }
   console.log(`✓ All ${CONFIG_CHAINS.length} conversion chains match upstream config.`);
+  return true;
+}
+
+/**
+ * Discover the current list of config names in OpenCC's master branch. Used by
+ * the coverage gate below; `opencc_config.schema` is the JSON schema for config
+ * files, not a conversion config, so it is filtered out by name.
+ */
+async function listUpstreamConfigs(): Promise<string[] | null> {
+  const apiUrl = "https://api.github.com/repos/BYVoid/OpenCC/contents/data/config?ref=master";
+  try {
+    const response = await fetch(apiUrl);
+    if (!response.ok) {
+      console.warn(`  Config coverage skipped: GitHub API returned ${response.status} ${response.statusText}`);
+      return null;
+    }
+    const data = await response.json() as Array<{ name: string; type: string }>;
+    return data
+      .filter((entry) => entry.type === "file" && entry.name.endsWith(".json") && entry.name !== "opencc_config.schema.json")
+      .map((entry) => entry.name.replace(/\.json$/, ""));
+  } catch (e) {
+    console.warn(`  Config coverage skipped: ${(e as Error).message}`);
+    return null;
+  }
+}
+
+/**
+ * Abort unless every upstream config is on BOTH contract lists — the chain one
+ * (`CONFIG_CHAINS` plus the explicitly-exempt `NOT_CHAIN_CHECKED`) and the
+ * segmentation one (`CONFIG_SEGMENTATION` + `CONFIG_NO_SEGMENTATION`).
+ *
+ * Why a gate over the lists themselves: the two checks below only fetch the
+ * configs they are TOLD to fetch. Drop one entry from `CONFIG_CHAINS` and the
+ * run stays green while that chain drifts unchecked — which is exactly the
+ * "silently one step short" failure the seal adoption made visible. Completeness
+ * of the roster is a separate claim from correctness of each comparison, so it
+ * needs its own gate. (test/upstream-contracts.test.ts checks the same two
+ * directions offline, against the committed fixture.)
+ *
+ * Returns false when the API could not be reached, so a network blip skips the
+ * check rather than failing the sync — same policy as the other upstream checks.
+ */
+async function verifyConfigCoverage(): Promise<boolean> {
+  const upstream = await listUpstreamConfigs();
+  if (!upstream) return false;
+
+  const chainCovered = new Set([...CONFIG_CHAINS.map((c) => c.config), ...Object.keys(NOT_CHAIN_CHECKED)]);
+  const segCovered = new Set([...CONFIG_SEGMENTATION.map((c) => c.config), ...CONFIG_NO_SEGMENTATION]);
+
+  const missingChain = upstream.filter((c) => !chainCovered.has(c));
+  const missingSeg = upstream.filter((c) => !segCovered.has(c));
+  // Stale roster entries are drift in the other direction: a config upstream
+  // removed leaves its list entry checking nothing, forever green.
+  const known = new Set(upstream);
+  const stale = [...chainCovered, ...segCovered].filter((c) => !known.has(c));
+
+  if (missingChain.length > 0 || missingSeg.length > 0 || stale.length > 0) {
+    const lines: string[] = [];
+    if (missingChain.length > 0) {
+      lines.push(`  Chain roster misses: ${missingChain.join(", ")}`);
+      lines.push(`  → add each to CONFIG_CHAINS (mirror it in src/presets.ts) or to NOT_CHAIN_CHECKED with a reason.`);
+    }
+    if (missingSeg.length > 0) {
+      lines.push(`  Segmentation roster misses: ${missingSeg.join(", ")}`);
+      lines.push(`  → declare it in CONFIG_SEGMENTATION (it cuts) or CONFIG_NO_SEGMENTATION (it does not).`);
+    }
+    if (stale.length > 0) {
+      lines.push(`  Rosters name config(s) no longer upstream: ${[...new Set(stale)].join(", ")}`);
+      lines.push(`  → drop them from the lists in scripts/lib/upstream-contracts.ts.`);
+    }
+    throw new Error(`Upstream config coverage incomplete (upstream has ${upstream.length} configs):\n${lines.join("\n")}`);
+  }
+  console.log(`✓ All ${upstream.length} upstream configs are on both rosters (${chainCovered.size} chain-checked or exempt, ${segCovered.size} segmentation-declared).`);
   return true;
 }
 
@@ -410,6 +427,10 @@ async function main() {
   } else {
     console.log("Skipping file-list comparison (no API response).");
   }
+
+  // The rosters must be complete before their contents mean anything.
+  console.log("Verifying every upstream config is on our rosters...");
+  await verifyConfigCoverage();
 
   // Chain composition is the signal file discovery cannot see.
   console.log("Verifying conversion chains against upstream config...");

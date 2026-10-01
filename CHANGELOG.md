@@ -16,6 +16,12 @@
   `cn2t` / `t2cn` 按设计不带，传 `seal` 得到的是「本 bundle 不含此 locale，请用 full」，
   不是「缺字典」那种指控自己打包出 bug 的消息。
 - ES Module 主入口按方向加载，不用小篆的消费者一个字节都不多拿。
+- **同步多一道会中止的对账：config 覆盖面**。上游 `data/config` 里每个 config 都必须落在
+  链比对名单或写明理由的豁免名单上，切段那两份同理；`test/upstream-contracts.test.ts` 离线
+  盯同一件事。起因是收养小篆时实测到的空缺——从 `CONFIG_CHAINS` 删掉 `s2seal`，链比对和切段
+  比对都照绿，因为那两道只按名单点名的 config 去取文件，「名单本身盖全没有」没人查。
+  契约名单随之移到 `scripts/lib/upstream-contracts.ts`（`sync-opencc.ts` 一被导入就会联网写盘，
+  测试拿不到它的常量）。
 
 ### 行为变化
 
