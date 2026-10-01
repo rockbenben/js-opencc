@@ -69,20 +69,24 @@ function Converter(options: ConverterOptions, protectedDict?: DictLike): (input:
   // from dictMap throw loudly — silently skipping a step would return
   // partially-converted text (JS callers bypass the TS type check).
   if (options.from !== "t") {
-    const dictFiles = variants2standard[options.from];
-    // Array.isArray, not truthiness: `variants2standard["constructor"]` is a
-    // truthy prototype member that would fall through to an opaque TypeError.
-    if (!Array.isArray(dictFiles)) throw new Error(`Unknown 'from' locale: ${options.from}`);
-    dictGroups.push(
-      dictFiles.map((name) => {
-        const d = dictMap[name];
-        // typeof, not truthiness: a dict CAN legitimately optimize to "" (all
-        // entries single-char identity pairs), and this also rejects prototype
-        // members like "toString" that `in` would accept.
-        if (typeof d !== "string") throw new Error(`Dictionary ${name} missing from t2cn bundle`);
-        return d;
-      })
-    );
+    const steps = variants2standard[options.from];
+    // Array.isArray on the step list AND its first step: `variants2standard` is
+    // keyed by string, so a prototype member like "constructor" is truthy and a
+    // non-array — either check alone lets something fall through to an opaque
+    // TypeError inside the map.
+    if (!Array.isArray(steps) || !Array.isArray(steps[0])) throw new Error(`Unknown 'from' locale: ${options.from}`);
+    for (const step of steps) {
+      dictGroups.push(
+        step.map((name) => {
+          const d = dictMap[name];
+          // typeof, not truthiness: a dict CAN legitimately optimize to "" (all
+          // entries single-char identity pairs), and this also rejects prototype
+          // members like "toString" that `in` would accept.
+          if (typeof d !== "string") throw new Error(`Dictionary ${name} missing from t2cn bundle`);
+          return d;
+        })
+      );
+    }
   }
 
   // From standard to cn (always needed)

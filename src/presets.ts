@@ -16,49 +16,56 @@
 export type LocaleCode = "cn" | "tw" | "twp" | "hk" | "hkp" | "jp" | "t";
 
 /**
- * Dictionary file names for converting from variants to OpenCC standard.
+ * Conversion steps from a variant to OpenCC standard.
  *
- * Each array is ONE conversion step, merged into a single trie. Order is the
- * REVERSE of OpenCC's `conversion_chain` order: OpenCC consults its dicts
- * first-match-wins, our trie is last-write-wins, so the highest-priority dict
- * (the phrase dicts) must be listed LAST. Chains mirror `tw2t` / `hk2t` /
- * `tw2sp` / `hk2sp` in OpenCC's data/config.
+ * 值 = **步骤列表**，按 OpenCC `conversion_chain` 的顺序依次执行；每一步是一个字典名单，
+ * 整个名单合进一个 trie。名单**内部**的顺序是 OpenCC 顺序的反面：上游首匹配即停，我们的
+ * trie 后写覆盖，所以优先级最高的（词组字典）要排在**最后**。步骤之间不反转——步骤就是
+ * 上游那一串 `dict`，一步对应一个 `conversion_chain` 元素。
+ *
+ * 步内可以合并、跨步不许合并：`group / union` 就是一个 trie，而先后两个步骤是两次 passes。
+ * 小篆两侧各两步（`年 →(SealVariants) 秊 →(SealCharactersRev) 小篆`），并进一个 trie 只走
+ * 一遍，第二次的输入根本不是 `秊`。链对账在 `scripts/sync-opencc.ts` 里按步比 upstream
+ * 的 `conversion_chain`，拍平它会当场红。
+ *
+ * Each array is ONE conversion step, merged into a single trie. Chains mirror
+ * `tw2t` / `hk2t` / `tw2sp` / `hk2sp` in OpenCC's data/config.
  */
-export const variants2standard: Record<string, string[]> = {
+export const variants2standard: Record<string, string[][]> = {
   // The generated dict sits between: upstream's group is
   // [STPhrases ∪ Generated] short-circuit STCharacters, so in last-write-wins
   // order STPhrases stays highest. Its value is the point — 出租车 must become
   // 出租車 as a pinned unit (char-wise conversion could pick wrong variants for
   // ambiguous characters), and segmentation needs it as a boundary entry.
-  cn: ["STCharacters", "STPhrases_GeneratedFromRegionalPhrases", "STPhrases"],
-  hk: ["HKVariantsRev", "HKVariantsRevPhrases"],
-  hkp: ["HKVariantsRev", "HKVariantsRevPhrases", "HKPhrasesRev"],
-  tw: ["TWVariantsRev", "TWVariantsRevPhrases"],
-  twp: ["TWVariantsRev", "TWVariantsRevPhrases", "TWPhrasesRev"],
-  jp: ["JPShinjitaiCharacters", "JPShinjitaiPhrases"],
+  cn: [["STCharacters", "STPhrases_GeneratedFromRegionalPhrases", "STPhrases"]],
+  hk: [["HKVariantsRev", "HKVariantsRevPhrases"]],
+  hkp: [["HKVariantsRev", "HKVariantsRevPhrases", "HKPhrasesRev"]],
+  tw: [["TWVariantsRev", "TWVariantsRevPhrases"]],
+  twp: [["TWVariantsRev", "TWVariantsRevPhrases", "TWPhrasesRev"]],
+  jp: [["JPShinjitaiCharacters", "JPShinjitaiPhrases"]],
 };
 
 /**
- * Dictionary file names for converting from OpenCC standard to variants.
- * Same ordering rule as above; chains mirror `t2tw` / `t2hk` / `s2twp` / `s2hkp`.
+ * Conversion steps from OpenCC standard to a variant. Same ordering rules as
+ * {@link variants2standard}; chains mirror `t2tw` / `t2hk` / `s2twp` / `s2hkp`.
  *
  * The `*VariantsPhrases` dicts are what keep proper nouns from being
  * over-converted (張棟樑 must not become 張棟梁, 純喫茶 not 純吃茶) — dropping
  * them silently diverges from OpenCC on hundreds of entries.
  */
-export const standard2variants: Record<string, string[]> = {
-  cn: ["TSCharacters", "TSPhrases"],
-  hk: ["HKVariants", "HKVariantsPhrases"],
-  hkp: ["HKVariants", "HKVariantsPhrases", "HKPhrases"],
-  tw: ["TWVariants", "TWVariantsPhrases"],
-  twp: ["TWVariants", "TWVariantsPhrases", "TWPhrases"],
-  jp: ["JPShinjitaiCharactersRev"],
+export const standard2variants: Record<string, string[][]> = {
+  cn: [["TSCharacters", "TSPhrases"]],
+  hk: [["HKVariants", "HKVariantsPhrases"]],
+  hkp: [["HKVariants", "HKVariantsPhrases", "HKPhrases"]],
+  tw: [["TWVariants", "TWVariantsPhrases"]],
+  twp: [["TWVariants", "TWVariantsPhrases", "TWPhrases"]],
+  jp: [["JPShinjitaiCharactersRev"]],
 };
 
 /**
  * All dictionary file names
  */
-export const allDictFiles = [...new Set([...Object.values(variants2standard).flat(), ...Object.values(standard2variants).flat()])];
+export const allDictFiles = [...new Set([...Object.values(variants2standard).flat(2), ...Object.values(standard2variants).flat(2)])];
 
 /** Traditional variants that carry their own regional vocabulary tables. */
 const REGIONAL_VARIANTS: ReadonlySet<string> = new Set(["tw", "twp", "hk", "hkp"]);

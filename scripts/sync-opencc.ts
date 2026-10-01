@@ -53,7 +53,9 @@ const IGNORED_DICT_FILES = ["CJK_Compatibility_Ideographs"];
  * Which OpenCC config each preset entry mirrors, so a drifting conversion chain
  * fails the sync instead of silently diverging.
  *
- * `step` indexes the config's `conversion_chain`: single-step configs (t2tw) use
+ * `step` is the index where THIS side's step list starts in the config's
+ * `conversion_chain`; the side may span several entries (the seal chains are two
+ * steps each) and every one is compared in order. Single-step configs (t2tw) use
  * 0; two-step ones (s2twp = cn→standard, then standard→twp) use 1 for the half
  * this preset owns. Missing here on purpose: the cn side (`STCharacters` /
  * `TSCharacters` groups), because OpenCC's s2t/t2s chains include dicts it
@@ -169,22 +171,29 @@ async function verifyChainsAgainstUpstream(): Promise<boolean> {
 
   const drift: string[] = [];
   for (const { config, side, locale, step } of CONFIG_CHAINS) {
-    let chain: unknown;
+    let chain: Array<{ dict?: unknown }>;
     try {
       const res = await fetch(`${OPENCC_CONFIG_URL}/${config}.json`);
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      chain = ((await res.json()) as { conversion_chain?: Array<{ dict?: unknown }> }).conversion_chain?.[step]?.dict;
+      chain = ((await res.json()) as { conversion_chain?: Array<{ dict?: unknown }> }).conversion_chain ?? [];
     } catch (e) {
       console.warn(`  Chain check skipped: could not fetch ${config}.json (${(e as Error).message})`);
       return false;
     }
-    const upstream = collectDicts(chain).filter((d) => !UNAVAILABLE_UPSTREAM_DICTS.includes(d));
-    // presets list highest-priority LAST (trie is last-write-wins) while OpenCC
-    // lists it FIRST (first match wins) — compare against the reversed preset.
-    const ours = [...((side === "to" ? standard2variants : variants2standard)[locale] ?? [])].reverse();
-    if (JSON.stringify(ours) !== JSON.stringify(upstream)) {
-      drift.push(`  ${config}: upstream [${upstream.join(" + ")}]  vs  presets.${side === "to" ? "standard2variants" : "variants2standard"}.${locale} [${ours.join(" + ")}]`);
+    const ours = (side === "to" ? standard2variants : variants2standard)[locale] ?? [];
+    if (step + ours.length > chain.length) {
+      drift.push(`  ${config}: our ${side}.${locale} needs ${ours.length} step(s) starting at ${step}, upstream chain has only ${chain.length}`);
+      continue;
     }
+    ours.forEach((ourStep, i) => {
+      const upstream = collectDicts(chain[step + i]?.dict).filter((d) => !UNAVAILABLE_UPSTREAM_DICTS.includes(d));
+      // presets list highest-priority LAST (trie is last-write-wins) while OpenCC
+      // lists it FIRST (first match wins) — compare against the reversed step.
+      const oursReversed = [...ourStep].reverse();
+      if (JSON.stringify(oursReversed) !== JSON.stringify(upstream)) {
+        drift.push(`  ${config} step ${step + i}: upstream [${upstream.join(" + ")}]  vs  presets.${side === "to" ? "standard2variants" : "variants2standard"}.${locale}[${i}] [${oursReversed.join(" + ")}]`);
+      }
+    });
   }
 
   if (drift.length > 0) {

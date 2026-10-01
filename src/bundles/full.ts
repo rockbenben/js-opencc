@@ -97,14 +97,18 @@ function Converter(options: ConverterOptions, protectedDict?: DictLike): (input:
 
   const dictGroups: DictGroup[] = [];
 
-  // From variant to standard
+  // From variant to standard, one group per step
   if (options.from !== "t") {
-    dictGroups.push(variants2standard[options.from].map((name) => dict[name]));
+    for (const step of variants2standard[options.from]) {
+      dictGroups.push(step.map((name) => dict[name]));
+    }
   }
 
-  // From standard to variant
+  // From standard to variant, one group per step
   if (options.to !== "t") {
-    dictGroups.push(standard2variants[options.to].map((name) => dict[name]));
+    for (const step of standard2variants[options.to]) {
+      dictGroups.push(step.map((name) => dict[name]));
+    }
   }
 
   // Cut the input before converting: without it the second step's regional
@@ -135,10 +139,11 @@ function Converter(options: ConverterOptions, protectedDict?: DictLike): (input:
   return convert;
 }
 
-// Locale data for ConverterBuilder compatibility
+// Locale data for ConverterBuilder compatibility — 每个 locale 是一串步骤，
+// 与 presets 的 `string[][]` 同形（DictGroup[]），不是单个 DictGroup。
 const Locale = {
-  from: Object.fromEntries(Object.entries(variants2standard).map(([locale, files]) => [locale, files.map((name) => dict[name])])),
-  to: Object.fromEntries(Object.entries(standard2variants).map(([locale, files]) => [locale, files.map((name) => dict[name])])),
+  from: Object.fromEntries(Object.entries(variants2standard).map(([locale, steps]) => [locale, steps.map((step) => step.map((name) => dict[name]))])),
+  to: Object.fromEntries(Object.entries(standard2variants).map(([locale, steps]) => [locale, steps.map((step) => step.map((name) => dict[name]))])),
 };
 
 // // 带切段的工厂也导出：只给不带切段的那个，自己拼链的人会静默丢掉地区词边界处理

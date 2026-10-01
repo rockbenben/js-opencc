@@ -34,8 +34,9 @@ export interface ConverterOptions {
  * Locale preset data containing dictionary groups
  */
 export interface LocalePreset {
-  from: Record<string, DictGroup>;
-  to: Record<string, DictGroup>;
+  /** 每个 locale = 一串转换步骤，每步是一个合并 trie 的字典名单（见 presets.ts） */
+  from: Record<string, DictGroup[]>;
+  to: Record<string, DictGroup[]>;
   /**
    * Dictionaries available to cut the input on, keyed by dict file name (the
    * names `segmentationDictsFor` returns, e.g. `STPhrases` / `TSPhrases`).
@@ -53,14 +54,14 @@ export function ConverterBuilder(localePreset: LocalePreset) {
   return function Converter(options: ConverterOptions): (input: string) => string {
     const dictGroups: DictGroup[] = [];
 
-    // Add 'from' dictionaries (variant -> standard)
-    if (options.from !== "t" && localePreset.from[options.from]) {
-      dictGroups.push(localePreset.from[options.from]);
+    // Add 'from' dictionaries (variant -> standard), one group per step
+    if (options.from !== "t") {
+      for (const step of localePreset.from[options.from] ?? []) dictGroups.push(step);
     }
 
-    // Add 'to' dictionaries (standard -> variant)
-    if (options.to !== "t" && localePreset.to[options.to]) {
-      dictGroups.push(localePreset.to[options.to]);
+    // Add 'to' dictionaries (standard -> variant), one group per step
+    if (options.to !== "t") {
+      for (const step of localePreset.to[options.to] ?? []) dictGroups.push(step);
     }
 
     // Segmentation needs a dictionary keyed in the INPUT's script, which a
@@ -77,10 +78,11 @@ export function ConverterBuilder(localePreset: LocalePreset) {
 /**
  * Dictionary files for a conversion, GROUPED BY CONVERSION STEP.
  *
- * Returns `string[][]`: each inner array is one conversion step
- * (variant→standard, then standard→variant). Each step MUST be loaded into a
- * SINGLE merged trie so the trie's longest-match lets phrase dictionaries
- * (STPhrases, *RevPhrases) win over single-character dictionaries.
+ * Returns `string[][]`: each inner array is one conversion step (a variant's
+ * side may contribute more than one — the seal chains are two steps). Each step
+ * MUST be loaded into a SINGLE merged trie so the trie's longest-match lets
+ * phrase dictionaries (STPhrases, *RevPhrases) win over single-character
+ * dictionaries.
  *
  * Correct usage:
  *   ConverterFactory(...getDictFiles(from, to).map(group => buildTrieFromGroup(group)))
@@ -92,6 +94,11 @@ export function ConverterBuilder(localePreset: LocalePreset) {
  * only need the flat file list (e.g. to know which dict files to bundle), call
  * `getDictFiles(from, to).flat()`.
  *
+ * The opposite mistake is equally silent: folding two *separate* steps into one
+ * trie. Steps run in sequence, so step two reads what step one wrote (年 →秊→小篆);
+ * a single pass over the merged dictionary never sees 秊. Two steps merged are not
+ * one step, however many entries they share.
+ *
  * @throws {Error} if `from` or `to` is an unknown locale (i.e. not `'t'` and not
  *   a key of `variants2standard` / `standard2variants`).
  */
@@ -99,17 +106,17 @@ export function getDictFiles(from: LocaleCode, to: LocaleCode): string[][] {
   const groups: string[][] = [];
 
   if (from !== "t") {
-    const fromFiles = variants2standard[from];
+    const steps = variants2standard[from];
     // Reject unknown locales loudly instead of silently producing a converter
     // that skips the step (which would return partially/un-converted text).
-    if (!fromFiles) throw new Error(`Unknown 'from' locale: ${from}`);
-    if (fromFiles.length) groups.push(fromFiles);
+    if (!steps) throw new Error(`Unknown 'from' locale: ${from}`);
+    for (const step of steps) if (step.length) groups.push(step);
   }
 
   if (to !== "t") {
-    const toFiles = standard2variants[to];
-    if (!toFiles) throw new Error(`Unknown 'to' locale: ${to}`);
-    if (toFiles.length) groups.push(toFiles);
+    const steps = standard2variants[to];
+    if (!steps) throw new Error(`Unknown 'to' locale: ${to}`);
+    for (const step of steps) if (step.length) groups.push(step);
   }
 
   return groups;

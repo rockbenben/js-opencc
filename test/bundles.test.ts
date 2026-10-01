@@ -91,10 +91,20 @@ describe("cn2t / t2cn bundles", () => {
 
   // The full bundle imports every dict eagerly; `Locale` is built from the same
   // map, so an undefined entry here means a preset dict is missing from it.
-  it("full bundle carries every preset dict", () => {
-    for (const [locale, group] of [...Object.entries(Locale.from), ...Object.entries(Locale.to)]) {
-      expect(group.length, locale).toBeGreaterThan(0);
-      for (const d of group) expect(typeof d, locale).toBe("string");
+  // 链的形状是「一侧 = 若干步，每步 = 一个合并 trie 的字典名单」，所以判据要走两层：
+  // 少一步、或某步里缺本字典，都是 `dict[name] === undefined` 进 trie 后静默少转。
+  it("full bundle carries every preset dict, step by step", () => {
+    for (const [side, all] of [
+      ["from", Locale.from],
+      ["to", Locale.to],
+    ] as const) {
+      for (const [locale, steps] of Object.entries(all)) {
+        expect(Array.isArray(steps[0]), `${side}.${locale} 第一步不是字典名单`).toBe(true);
+        for (const [i, group] of steps.entries()) {
+          expect(group.length, `${side}.${locale}[${i}] 空步骤`).toBeGreaterThan(0);
+          for (const d of group) expect(typeof d, `${side}.${locale}[${i}]`).toBe("string");
+        }
+      }
     }
   });
 });
