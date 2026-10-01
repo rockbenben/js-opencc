@@ -61,11 +61,20 @@ cn2twp("软件"); // 軟體
 
 const hk2cn = await createConverter({ from: "hk", to: "cn" });
 hk2cn("軟件"); // 软件
+
+// 小篆（实验性）：输出落在 U+3D000–U+3FC3F，多数环境没有字形，看到的是豆腐块
+const t2seal = await createConverter({ from: "t", to: "seal" });
+t2seal("天地"); // U+3D003 U+3F85A
+
+// 反向一次调用到位。上游只有 seal2t.json，简体重写要自己串 seal2t | t2s；
+// 这里 from/to 照常写即可，两段链在同一颗管线里跑完
+const seal2cn = await createConverter({ from: "seal", to: "cn" });
+seal2cn(String.fromCodePoint(0x3d003, 0x3f85a)); // 天地
 ```
 
 ### CDN（浏览器）
 
-三个 bundle 都注册全局 `OpenCC`，**同一页面只引入其中一个**；每个 bundle 只接受自己支持的方向，传别的方向会直接抛错。
+三个 bundle 都注册全局 `OpenCC`，**同一页面只引入其中一个**；每个 bundle 只接受自己支持的方向，传别的方向会直接抛错（`seal` 只在完整版里，`cn2t` / `t2cn` 传它会拿到 `does not carry 'to: seal' — use the full bundle`）。
 
 ```html
 <!-- 完整版：任意方向 -->

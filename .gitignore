@@ -39,3 +39,4 @@ coverage/
 
 # npm pack 的产物
 *.tgz
+.qoder*
