@@ -325,7 +325,7 @@ describe("幂等与往返收敛", () => {
   const TEXT = "夜色渐深，出租车司机把软件更新到最新版本，顺手用鼠标点开了视频网站的首页。";
 
   it("同方向重复转换不再变化", async () => {
-    for (const [from, to] of [["cn", "t"], ["t", "cn"], ["cn", "twp"], ["twp", "cn"]] as const) {
+    for (const [from, to] of [["cn", "t"], ["t", "cn"], ["cn", "twp"], ["twp", "cn"], ["cn", "seal"], ["seal", "cn"]] as const) {
       const convert = await createConverter({ from, to }, []);
       const once = convert(TEXT);
       expect(convert(once), `${from}→${to} 二次转换又变了`).toBe(once);
@@ -341,10 +341,10 @@ describe("幂等与往返收敛", () => {
 });
 
 describe("README 功能声明对账（每条对应文档里一句具体承诺）", () => {
-  it("地区代码表的 7 个 locale 任意组合都能构造并转换（42 方向冒烟）", async () => {
+  it("地区代码表的 8 个 locale 任意组合都能构造并转换（56 方向冒烟）", async () => {
     // README 的地区代码表暗示任意 from→to 可用——从没全扫过。判据：能构造、
     // 输出非空、且没有 PUA 占位符泄漏到结果里。
-    const LOCALES = ["cn", "tw", "twp", "hk", "hkp", "jp", "t"] as const;
+    const LOCALES = ["cn", "tw", "twp", "hk", "hkp", "jp", "seal", "t"] as const;
     for (const from of LOCALES) {
       for (const to of LOCALES) {
         if (from === to) continue;

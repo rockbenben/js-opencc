@@ -25,6 +25,17 @@ type DictGroup = DictLike[];
 // Available target locales for cn2t
 type TargetLocale = "t" | "tw" | "twp" | "hk" | "hkp" | "jp";
 
+/**
+ * The targets this bundle actually carries dictionaries for, as a list rather
+ * than only as the type above: `seal` is a `LocaleCode` and the full bundle
+ * ships it, but a "simplified → traditional, small download" bundle has no
+ * business carrying ~113 KB of seal data. JS callers bypass `TargetLocale`, so
+ * the gap needs a runtime answer — and it has to be a different message from
+ * "dictionary missing", which would accuse this bundle of a packaging bug that
+ * does not exist.
+ */
+const BUNDLE_TARGETS: readonly string[] = ["t", "tw", "twp", "hk", "hkp", "jp"];
+
 interface ConverterOptions {
   from?: "cn";
   to: TargetLocale;
@@ -84,6 +95,9 @@ function Converter(options: ConverterOptions, protectedDict?: DictLike): (input:
     // non-array — either check alone lets something fall through to an opaque
     // TypeError inside the map.
     if (!Array.isArray(steps) || !Array.isArray(steps[0])) throw new Error(`Unknown 'to' locale: ${options.to}`);
+    if (!BUNDLE_TARGETS.includes(options.to)) {
+      throw new Error(`cn2t bundle does not carry 'to: ${options.to}' — use the full bundle`);
+    }
     for (const step of steps) {
       dictGroups.push(
         step.map((name) => {

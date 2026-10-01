@@ -68,6 +68,12 @@ describe("cn2t / t2cn bundles", () => {
     // The supported shapes still work, with or without the redundant argument.
     expect(T2cn({ from: "tw", to: "cn" })("軟件")).toBe("软件");
     expect(Cn2t({ from: "cn", to: "tw" })("软件")).toBe("軟件");
+    // 小篆是 LocaleCode，但单向轻包按设计不带它那 ~113 KB 数据。消息必须指向 full
+    // bundle，而不是 "Dictionary ... missing from ... bundle"——后者指控的是一个
+    // 并不存在的打包 bug（同上一条教训）。
+    expect(() => Cn2t({ to: "seal" as never })).toThrow(/cn2t bundle does not carry 'to: seal'/);
+    expect(() => T2cn({ from: "seal" as never })).toThrow(/t2cn bundle does not carry 'from: seal'/);
+    expect(() => Cn2t({ to: "seal" as never })).not.toThrow(/missing from/);
   });
 
   // A locale name reaching the preset maps through the prototype chain used to

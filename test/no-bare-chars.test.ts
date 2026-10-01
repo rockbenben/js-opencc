@@ -6,6 +6,8 @@
  * 只有 cat -A 或逐字节扫描才现形。人已经证明记不住,让测试记。
  *
  * 词典本体(src/dict/)不在扫描范围——它们是数据,且由同步脚本生成。
+ * test/fixtures/ 同属数据（同步脚本从上游整份下载），那里改由一条正向断言守着，
+ * 见下面「官方用例夹具里的兼容汉字与小篆字符仍在」。
  * 需要在文里表示 PUA 或兼容汉字时写 \uE000 这样的转义(本文件自身也被扫)。
  */
 import { describe, it, expect } from "vitest";
@@ -18,7 +20,10 @@ function* walk(dir: string): Generator<string> {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) {
-      if (name === "node_modules" || name === "dist" || name === "dict") continue;
+      // fixtures 与 dict 同属「下载/生成的数据」：官方用例夹具由 sync 整份覆盖，
+      // 里面出现兼容汉字是上游的内容（小篆归一化那条用例的输入就是 U+F914），
+      // 不是我们能改的源码。折叠之责改由下面那条专门断言守着。
+      if (name === "node_modules" || name === "dist" || name === "dict" || name === "fixtures") continue;
       yield* walk(p);
     } else if (/\.(ts|mjs|md|json|txt)$/.test(name)) {
       yield p;
@@ -55,5 +60,19 @@ describe("裸字符扫描", () => {
       }
     }
     expect(offenders, offenders.join("\n")).toEqual([]);
+  });
+
+  it("官方用例夹具里的兼容汉字与小篆字符仍在（豁免扫描后补的那条断言）", () => {
+    // 上面放过了 test/fixtures——那是 sync 从上游整份下载的夹具，内容不由我们定。
+    // 但「兼容汉字被一次 NFC 悄悄折叠」对夹具同样成立，而后果不一样严重：夹具里的
+    // U+F914 一旦被换成普通汉字，那条归一化用例就永远绿着，却再也不测归一化。
+    // 所以扫描豁免的地方，要有一条正向断言顶上去。
+    const text = readFileSync(join(ROOT, "test", "fixtures", "opencc-testcases.json"), "utf8");
+    expect(text.includes(String.fromCodePoint(0xf914)), "夹具里的 U+F914 不见了——它被折叠过，重跑 sync 可复原").toBe(true);
+    const hasSealChar = [...text].some((c) => {
+      const cp = c.codePointAt(0) ?? 0;
+      return cp >= 0x3d000 && cp <= 0x3fc3f;
+    });
+    expect(hasSealChar, "夹具里没有小篆字符——上游的 t2seal/seal2t 用例被改写过").toBe(true);
   });
 });

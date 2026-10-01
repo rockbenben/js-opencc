@@ -32,7 +32,10 @@ import type { LocaleCode } from "../src/presets.js";
 
 // ── 官方用例 ─────────────────────────────────────────────────────────────
 
-/** OpenCC config 名 → 我们的 locale 对。16 种全部有映射。 */
+/**
+ * OpenCC config 名 → 我们的 locale 对。上游 testcases 里出现的每个 config 都必须在这里，
+ * 下面遇到没映射的名字会抛——那正是「上游加了新 config 而我们静默没跟上」的闸门。
+ */
 const CONFIG_LOCALES: Record<string, { from: LocaleCode; to: LocaleCode }> = {
   s2t: { from: "cn", to: "t" },
   t2s: { from: "t", to: "cn" },
@@ -50,6 +53,9 @@ const CONFIG_LOCALES: Record<string, { from: LocaleCode; to: LocaleCode }> = {
   hk2t: { from: "hk", to: "t" },
   t2jp: { from: "t", to: "jp" },
   jp2t: { from: "jp", to: "t" },
+  t2seal: { from: "t", to: "seal" },
+  seal2t: { from: "seal", to: "t" },
+  s2seal: { from: "cn", to: "seal" },
 };
 
 interface TestCase {
@@ -219,5 +225,34 @@ describe("切段（segmentation）", () => {
     for (const text of ["头发和发现", "", "abc", "头发", "无关文字", "头发头发头发"]) {
       expect(trie.segment(text).join(""), `切段丢字：${text}`).toBe(text);
     }
+  });
+});
+
+describe("反查表选词遵守 @reverse-prefer", () => {
+  // 上游 JPShinjitaiCharacters 给 鹽 的候选是 䀋 / 塩，并用 `# @reverse-prefer:` 点名要
+  // 塩；早期实现只看文件顺序，于是这三条一路发到今天。官方 testcases 里没有这三个字，
+  // 全量比对一直是绿的——这种漏网的偏差只能自己造证人。
+  it("t2jp 取被偏好的候选，而不是文件顺序的首个", async () => {
+    const t2jp = await createConverter({ from: "t", to: "jp", loadCustomPhrases: false }, []);
+    expect(t2jp("鹽"), "曾给 䀋，多数字体里是豆腐块").toBe("塩");
+    expect(t2jp("鋪"), "曾给 舖").toBe("舗");
+    expect(t2jp("莊"), "曾给 庄——简体形混进日文输出").toBe("荘");
+  });
+});
+
+describe("小篆链按步走", () => {
+  it("t2seal 的中间字形只存在于第一步的输出里", async () => {
+    const t2seal = await createConverter({ from: "t", to: "seal", loadCustomPhrases: false }, []);
+    // 年 →(SealVariants) 秊 →(SealCharactersRev) 小篆。两步并进一个 trie 就停在 秊：
+    //  trie 只走一遍，第二次查的输入根本不是它。期望值是官方用例 case_077 里的 年。
+    expect(t2seal(String.fromCodePoint(0x5e74))).toBe(String.fromCodePoint(0x3e421));
+  });
+
+  it("seal2t 把小篆还原成标准字", async () => {
+    const seal2t = await createConverter({ from: "seal", to: "t", loadCustomPhrases: false }, []);
+    // 官方用例 case_070：一串小篆还原为 天地玄黄宇宙洪荒
+    const input = [0x3d003, 0x3f85a, 0x3db5d, 0x3f936, 0x3e4b6, 0x3e4fc, 0x3effc].map((c) => String.fromCodePoint(c)).join("");
+    const want = [0x5929, 0x5730, 0x7384, 0x9ec3, 0x5b87, 0x5b99, 0x6d2a].map((c) => String.fromCodePoint(c)).join("");
+    expect(seal2t(input)).toBe(want);
   });
 });

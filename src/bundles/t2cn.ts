@@ -25,6 +25,9 @@ type DictGroup = DictLike[];
 // Available source locales for t2cn
 type SourceLocale = "t" | "tw" | "twp" | "hk" | "hkp" | "jp";
 
+/** The sources this bundle carries dictionaries for — see cn2t's BUNDLE_TARGETS. */
+const BUNDLE_SOURCES: readonly string[] = ["t", "tw", "twp", "hk", "hkp", "jp"];
+
 interface ConverterOptions {
   from: SourceLocale;
   to?: "cn";
@@ -75,6 +78,12 @@ function Converter(options: ConverterOptions, protectedDict?: DictLike): (input:
     // non-array — either check alone lets something fall through to an opaque
     // TypeError inside the map.
     if (!Array.isArray(steps) || !Array.isArray(steps[0])) throw new Error(`Unknown 'from' locale: ${options.from}`);
+    // `seal` is a LocaleCode the full bundle serves; this one does not carry its
+    // ~113 KB of data. Say so instead of letting the dictMap lookup report a
+    // "dictionary missing" packaging bug that does not exist.
+    if (!BUNDLE_SOURCES.includes(options.from)) {
+      throw new Error(`t2cn bundle does not carry 'from: ${options.from}' — use the full bundle`);
+    }
     for (const step of steps) {
       dictGroups.push(
         step.map((name) => {

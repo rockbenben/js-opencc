@@ -11,9 +11,11 @@
  * - hk: Traditional Chinese (Hong Kong)
  * - hkp: Traditional Chinese (Hong Kong) with phrase conversion
  * - jp: Japanese Shinjitai
+ * - seal: 小篆（Unicode 18.0 篆書區塊 U+3D000..U+3FC3F）。上游标为实验性：输出需要
+ *   支持该区块的字型，否则是豆腐
  * - t: OpenCC standard Traditional Chinese
  */
-export type LocaleCode = "cn" | "tw" | "twp" | "hk" | "hkp" | "jp" | "t";
+export type LocaleCode = "cn" | "tw" | "twp" | "hk" | "hkp" | "jp" | "seal" | "t";
 
 /**
  * Conversion steps from a variant to OpenCC standard.
@@ -43,6 +45,8 @@ export const variants2standard: Record<string, string[][]> = {
   tw: [["TWVariantsRev", "TWVariantsRevPhrases"]],
   twp: [["TWVariantsRev", "TWVariantsRevPhrases", "TWPhrasesRev"]],
   jp: [["JPShinjitaiCharacters", "JPShinjitaiPhrases"]],
+  // seal2t.json 的两步，顺序照上游：先 小篆 → 现代汉字，再还原《說文》隶定字形。
+  seal: [["SealCharacters"], ["SealVariantsRev"]],
 };
 
 /**
@@ -60,6 +64,9 @@ export const standard2variants: Record<string, string[][]> = {
   tw: [["TWVariants", "TWVariantsPhrases"]],
   twp: [["TWVariants", "TWVariantsPhrases", "TWPhrases"]],
   jp: [["JPShinjitaiCharactersRev"]],
+  // t2seal.json 的两步：现代标准字 →《說文》隸定字，然后 汉字 → 小篆。
+  // 顺序不能并，理由见 {@link variants2standard} 的「跨步不许合并」。
+  seal: [["SealVariants"], ["SealCharactersRev"]],
 };
 
 /**
@@ -95,6 +102,12 @@ const REGIONAL_VARIANTS: ReadonlySet<string> = new Set(["tw", "twp", "hk", "hkp"
  *
  * `jp` is excluded deliberately: Shinjitai conversion has no phrase table
  * keyed in the source script, and OpenCC declares no segmentation for it.
+ *
+ * `seal` likewise gets no cut, and for a reason worth keeping straight: its
+ * extra steps map single characters only, so no phrase dictionary is around to
+ * bite across a boundary — a multi-step chain is not by itself a reason to
+ * segment. `scripts/sync-opencc.ts` re-checks that no config we skip here ever
+ * grows a `segmentation` upstream.
  *
  * ## The second segmentation dict: `STPhrases_GeneratedFromRegionalPhrases`
  *

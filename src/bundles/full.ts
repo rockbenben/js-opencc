@@ -28,6 +28,10 @@ import TWPhrasesRev from "../dict/TWPhrasesRev.js";
 import JPShinjitaiCharacters from "../dict/JPShinjitaiCharacters.js";
 import JPShinjitaiCharactersRev from "../dict/JPShinjitaiCharactersRev.js";
 import JPShinjitaiPhrases from "../dict/JPShinjitaiPhrases.js";
+import SealCharacters from "../dict/SealCharacters.js";
+import SealCharactersRev from "../dict/SealCharactersRev.js";
+import SealVariants from "../dict/SealVariants.js";
+import SealVariantsRev from "../dict/SealVariantsRev.js";
 import CNTWPhrases from "../dict/CNTWPhrases.js";
 
 const dict: Record<string, string> = {
@@ -51,6 +55,10 @@ const dict: Record<string, string> = {
   JPShinjitaiCharacters,
   JPShinjitaiCharactersRev,
   JPShinjitaiPhrases,
+  SealCharacters,
+  SealCharactersRev,
+  SealVariants,
+  SealVariantsRev,
 };
 
 // Invariant: `dict` carries every name in allDictFiles, so the lookups below
