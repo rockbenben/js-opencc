@@ -560,11 +560,15 @@ export function ProtectedConverter(
  * The value is everything after the FIRST space (values may contain spaces,
  * e.g. 二维码 → "QR Code") — same rule as `Trie.loadDict`'s string form.
  *
- * Collision policy, identical to `reverseEntries` in scripts/sync-opencc.ts:
+ * Collision policy, same first-wins + identity-outranks as `reverseEntries` in
+ * scripts/lib/reverse-dict.ts:
  * when several keys share one value (U盘/优盘 → 隨身碟) the FIRST key wins,
  * because dicts list the preferred term first and the trie is last-wins — so
  * without this the trailing synonym takes over (隨身碟 → 优盘). An identity pair
  * outranks that, leaving the term untouched rather than guessing a synonym.
+ * (The generator has one rule this runtime path cannot know: upstream's
+ * `# @reverse-prefer:` comments name a winner by hand, and a packed dict string
+ * has lost them by the time this runs.)
  *
  * Entries with no separator are skipped, as `Trie.loadDict` does.
  */

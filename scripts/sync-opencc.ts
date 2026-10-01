@@ -10,6 +10,7 @@ import * as crypto from "crypto";
 import { fileURLToPath } from "url";
 import { variants2standard, standard2variants, segmentationDictsFor, type LocaleCode } from "../src/presets.js";
 import { Trie } from "../src/core.js";
+import { expandDictForReverse, parseReversePreferences, reverseEntries } from "./lib/reverse-dict.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -343,35 +344,6 @@ const dictModuleSource = (optimized: string): string =>
   `const dict: string = ${JSON.stringify(optimized)};\nexport default dict;\n`;
 
 
-function reverseEntries(entries: [string, string][]): [string, string][] {
-  // Reverse mapping: value -> key. When several keys collapse onto one value
-  // (HKVariants has both 才→才 and 纔→才), the IDENTITY pair must win: the
-  // trie is last-wins, so keeping all entries shipped 才→纔, 煙→菸, 核→覈,
-  // 梁→樑 — and entriesToOptimized then dropped the correct single-char
-  // identity pair, leaving only the wrong mapping. Char-level reversal falls
-  // back to identity; the *RevPhrases dicts disambiguate in context (上梁→上樑).
-  // Non-identity collisions (none upstream today) keep the first entry.
-  //
-  // Status audited after the multi-value expansion: on CURRENT upstream data
-  // the identity clause never fires — every collision group across
-  // HKVariants / TWVariants / JPShinjitaiCharacters happens to list the
-  // identity key first (it sorts lower by code point, e.g. 才 U+624D before
-  // 纔 U+7E94), so first-wins already picks it. That ordering is a
-  // coincidence of today's code points, not an upstream contract — a future
-  // collision group whose identity key sorts AFTER a variant would ship the
-  // wrong mapping without this clause. One `|| k === v` is cheap insurance;
-  // do not delete it for being "never hit". The end behavior is pinned by
-  // the 人才→人才 test either way, and the official OpenCC testcases now
-  // guard all reverse-generated chains (t2jp/jp2t/tw2t/hk2t) wholesale.
-  const reversed = new Map<string, string>();
-  for (const [k, v] of entries) {
-    if (!reversed.has(v) || k === v) {
-      reversed.set(v, k);
-    }
-  }
-  return [...reversed.entries()];
-}
-
 async function main() {
   const officialDir = path.join(ROOT_DIR, "data", "official");
   const dictDir = path.join(ROOT_DIR, "src", "dict");
@@ -464,25 +436,9 @@ async function main() {
       continue;
     }
 
-    // Reverse dicts must be built from ALL candidate values, not just the
-    // first one that `parseToEntries` keeps for forward conversion —
-    // JPShinjitaiCharacters has `弁→辨 辯 瓣`, and truncating to 辨→弁 loses
-    // 辯→弁 and 瓣→弁, so t2jp turned 辯護士 into 辯護士 instead of 弁護士
-    // (caught by official testcase case_040). OpenCC's own reverse.py emits
-    // value→key for every value; this mirrors it. The identity-outranks-
-    // first-wins collision policy in `reverseEntries` applies unchanged.
-    const expanded: [string, string][] = [];
-    for (const line of srcRaw.split("\n")) {
-      const l = line.trim();
-      if (!l || l.startsWith("#")) continue;
-      const tab = l.indexOf("\t");
-      if (tab < 0) continue;
-      const key = l.slice(0, tab);
-      for (const v of l.slice(tab + 1).trim().split(" ").filter(Boolean)) {
-        expanded.push([key, v]);
-      }
-    }
-    const entries = reverseEntries(expanded);
+    // 全部候选展开、@reverse-prefer 提首、identity 兜底——规则集中在
+    // scripts/lib/reverse-dict.ts，逐条对齐上游 data/scripts/common.py 的 Dict.swap()。
+    const entries = reverseEntries(expandDictForReverse(srcRaw), parseReversePreferences(srcRaw));
 
     // Save reverse dict (JSON.stringify escapes any special chars — see above).
     const optimized = entriesToOptimized(entries);

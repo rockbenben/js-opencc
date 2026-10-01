@@ -298,7 +298,8 @@ describe("reverseDictString", () => {
     expect(reverseDictString("U盘 隨身碟|优盘 隨身碟")).toEqual([["隨身碟", "U盘"]]);
   });
 
-  // Matches reverseEntries in sync-opencc: an identity pair beats an earlier
+  // Same policy as reverseEntries in scripts/lib/reverse-dict.ts (whose own
+  // cases live in test/reverse-dict.test.ts): an identity pair beats an earlier
   // synonym, so an ambiguous term is left alone rather than guessed at.
   it("lets an identity pair override an earlier key", () => {
     expect(reverseDictString("优盘 隨身碟|隨身碟 隨身碟")).toEqual([["隨身碟", "隨身碟"]]);
